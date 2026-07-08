@@ -1,9 +1,20 @@
-import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
+import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
+import FlagOutlinedIcon from "@mui/icons-material/FlagOutlined";
+import GppGoodOutlinedIcon from "@mui/icons-material/GppGoodOutlined";
+import PendingActionsOutlinedIcon from "@mui/icons-material/PendingActionsOutlined";
+import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
+import TrendingUpOutlinedIcon from "@mui/icons-material/TrendingUpOutlined";
+import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import {
+  Box,
   Card,
   CardContent,
+  Chip,
+  Divider,
   Grid2,
-  IconButton,
+  LinearProgress,
   Skeleton,
   Stack,
   TextField,
@@ -11,7 +22,9 @@ import {
   ToggleButtonGroup,
   Tooltip as MuiTooltip,
   Typography,
+  useTheme,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useQuery } from "@tanstack/react-query";
 import { format, parseISO, startOfMonth, subDays, subMonths } from "date-fns";
 import { motion } from "framer-motion";
@@ -34,16 +47,26 @@ import { ScreeningRunsPanel } from "@/features/results/ScreeningRunsPanel";
 import { api } from "@/services/api";
 import { RunRecord } from "@/types/api";
 
-const chartColors = ["#22a06b", "#c77700", "#d14343", "#0b5ed7", "#6f42c1"];
+const chartColors = ["#1f7a5a", "#b86b00", "#c83f4f", "#2459d6", "#6b56d6"];
 
 type InsightWindow = "all" | "weekly" | "monthly" | "custom";
+type MetricTone = "primary" | "success" | "warning" | "error" | "violet";
 
-const metricHelp: Record<string, string> = {
-  "Total Screenings": "Total number of entities screened across all runs.",
-  "Matches Found": "Count of results flagged as potential sanctions matches.",
-  "Cleared Results": "Count of results that were screened and marked clear.",
-  "Pending Reviews": "Count of results awaiting analyst/compliance review.",
-  "Match Rate": "Percentage of screened entities that were flagged as potential matches.",
+const metricHelp = {
+  "Entities Screened": "Total entities screened across the selected sessions.",
+  "Matches Found": "Results flagged as potential sanctions matches.",
+  "Needs Review": "Results awaiting analyst or compliance review.",
+  "Clear Results": "Screened entities marked clear.",
+  "Match Rate": "Percentage of screened entities flagged as potential matches.",
+  Sessions: "Completed screening sessions inside the selected date range.",
+};
+
+const toneColors: Record<MetricTone, string> = {
+  primary: "#2459d6",
+  success: "#1f7a5a",
+  warning: "#b86b00",
+  error: "#c83f4f",
+  violet: "#6b56d6",
 };
 
 const renderPieLabel = ({
@@ -56,23 +79,101 @@ const renderPieLabel = ({
   percent: number;
 }) => (percent > 0.04 && value > 0 ? `${name}: ${value}` : "");
 
-function KpiCard({ label, value }: { label: keyof typeof metricHelp; value: number }) {
+function KpiCard({
+  label,
+  value,
+  icon,
+  tone,
+  supportingText,
+}: {
+  label: keyof typeof metricHelp;
+  value: number | string;
+  icon: React.ReactNode;
+  tone: MetricTone;
+  supportingText?: string;
+}) {
+  const theme = useTheme();
+  const color = toneColors[tone];
+
   return (
     <MuiTooltip title={metricHelp[label]} arrow>
-      <span style={{ display: "block" }}>
+      <span style={{ display: "block", height: "100%" }}>
         <Card
           component={motion.div}
-          whileHover={{ y: -2 }}
-          transition={{ duration: 0.2 }}
-          sx={{ border: 1, borderColor: "divider", bgcolor: (theme) => theme.palette.glass.background, backdropFilter: "blur(8px)" }}
+          whileHover={{ y: -3 }}
+          transition={{ duration: 0.18 }}
+          sx={{
+            height: "100%",
+            overflow: "hidden",
+            border: 1,
+            borderColor: alpha(color, theme.palette.mode === "dark" ? 0.36 : 0.2),
+            borderRadius: "8px",
+            bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === "dark" ? 0.76 : 0.92),
+            boxShadow: `0 18px 45px ${alpha(color, theme.palette.mode === "dark" ? 0.12 : 0.08)}`,
+            position: "relative",
+            "&:before": {
+              content: '""',
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(135deg, ${alpha(color, 0.13)}, transparent 46%)`,
+              pointerEvents: "none",
+            },
+          }}
         >
-          <CardContent>
-            <Typography variant="body2" color="text.secondary">{label}</Typography>
-            <Typography variant="h5">{value.toLocaleString()}</Typography>
+          <CardContent sx={{ position: "relative", p: 2 }}>
+            <Stack direction="row" spacing={1.25} alignItems="flex-start" justifyContent="space-between">
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>
+                  {label}
+                </Typography>
+                <Typography variant="h4" sx={{ mt: 0.6, fontWeight: 800, letterSpacing: 0 }}>
+                  {typeof value === "number" ? value.toLocaleString() : value}
+                </Typography>
+              </Box>
+              <Box
+                sx={{
+                  width: 38,
+                  height: 38,
+                  flex: "0 0 auto",
+                  display: "grid",
+                  placeItems: "center",
+                  borderRadius: "8px",
+                  color,
+                  bgcolor: alpha(color, 0.12),
+                }}
+              >
+                {icon}
+              </Box>
+            </Stack>
+            {supportingText && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                {supportingText}
+              </Typography>
+            )}
           </CardContent>
         </Card>
       </span>
     </MuiTooltip>
+  );
+}
+
+function DashboardSurface({ children, sx }: { children: React.ReactNode; sx?: object }) {
+  const theme = useTheme();
+
+  return (
+    <Card
+      sx={{
+        height: "100%",
+        border: 1,
+        borderColor: alpha(theme.palette.divider, 0.9),
+        borderRadius: "8px",
+        bgcolor: alpha(theme.palette.background.paper, theme.palette.mode === "dark" ? 0.76 : 0.94),
+        boxShadow: `0 18px 50px ${alpha(theme.palette.common.black, theme.palette.mode === "dark" ? 0.28 : 0.07)}`,
+        ...sx,
+      }}
+    >
+      {children}
+    </Card>
   );
 }
 
@@ -108,7 +209,81 @@ function dateKeyToNumber(key: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function formatRunDate(startedAt: string) {
+  try {
+    return format(parseISO(startedAt), "MMM d, yyyy");
+  } catch {
+    return "No date";
+  }
+}
+
+function formatRangeLabel(window: InsightWindow, fromDate: string, toDate: string) {
+  if (window === "weekly") return "Last 7 days";
+  if (window === "monthly") return "This month and last month";
+  if (window === "custom") {
+    if (fromDate && toDate) return `${format(parseISO(fromDate), "MMM d")} - ${format(parseISO(toDate), "MMM d, yyyy")}`;
+    if (fromDate || toDate) return format(parseISO(fromDate || toDate), "MMM d, yyyy");
+    return "Custom range";
+  }
+  return "All completed sessions";
+}
+
+function EmptyChartState({ label }: { label: string }) {
+  return (
+    <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", minHeight: 180 }}>
+      <Typography variant="body2" color="text.secondary">
+        {label}
+      </Typography>
+    </Stack>
+  );
+}
+
+function SourceRanking({ data, loading }: { data: Array<{ name: string; value: number }>; loading: boolean }) {
+  const theme = useTheme();
+  const max = Math.max(...data.map((item) => item.value), 1);
+
+  if (loading) {
+    return <Skeleton variant="rounded" height={158} sx={{ borderRadius: "8px" }} />;
+  }
+
+  if (!data.length) {
+    return <EmptyChartState label="No list activity in this range." />;
+  }
+
+  return (
+    <Stack spacing={1.25}>
+      {data.map((item, index) => (
+        <Box key={item.name}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {item.name}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {item.value.toLocaleString()}
+            </Typography>
+          </Stack>
+          <LinearProgress
+            variant="determinate"
+            value={(item.value / max) * 100}
+            sx={{
+              height: 8,
+              mt: 0.65,
+              borderRadius: 999,
+              bgcolor: alpha(theme.palette.text.primary, 0.08),
+              "& .MuiLinearProgress-bar": {
+                borderRadius: 999,
+                bgcolor: chartColors[index % chartColors.length],
+              },
+            }}
+          />
+        </Box>
+      ))}
+    </Stack>
+  );
+}
+
 export function DashboardPage() {
+  const theme = useTheme();
 
   const runsQuery = useQuery({
     queryKey: ["results"],
@@ -137,9 +312,6 @@ export function DashboardPage() {
     }
     return stableRuns;
   }, [runsQuery.data, stableRuns]);
-
-  const allCompletedRuns = React.useMemo(() => effectiveRuns.filter(isCompletedRun), [effectiveRuns]);
-
 
   const [insightWindow, setInsightWindow] = React.useState<InsightWindow>("all");
   const [fromDate, setFromDate] = React.useState("");
@@ -225,6 +397,7 @@ export function DashboardPage() {
     const reviewNeeded = filteredRuns.reduce((sum, run) => sum + run.reviewNeeded, 0);
     const clear = filteredRuns.reduce((sum, run) => sum + run.clear, 0);
     const failed = filteredRuns.filter((run) => run.status.toLowerCase() === "failed").length;
+    const latestRun = [...filteredRuns].sort((a, b) => dateKeyToNumber(getRunDateKey(b.startedAt)) - dateKeyToNumber(getRunDateKey(a.startedAt)))[0];
 
     const trendMap = new Map<string, { screenings: number; matches: number }>();
     for (const run of filteredRuns) {
@@ -252,105 +425,269 @@ export function DashboardPage() {
     ];
 
     const matchRate = totalVendors > 0 ? Math.round((flagged / totalVendors) * 100) : 0;
+    const reviewRate = totalVendors > 0 ? Math.round((reviewNeeded / totalVendors) * 100) : 0;
 
     return {
       totals: {
-        completedScreenings: totalRuns,
+        sessions: totalRuns,
         entitiesProcessed: totalVendors,
         flagged,
         reviewNeeded,
         clear,
         matchRate,
+        reviewRate,
+        failed,
       },
+      latestRun,
       trend,
       riskDistribution,
       statusDistribution,
     };
   }, [filteredRuns, insightWindow]);
 
+  const rangeLabel = formatRangeLabel(insightWindow, fromDate, toDate);
+  const priorityMessage =
+    insights.totals.flagged > 0
+      ? `${insights.totals.flagged.toLocaleString()} flagged result${insights.totals.flagged === 1 ? "" : "s"}`
+      : insights.totals.reviewNeeded > 0
+        ? `${insights.totals.reviewNeeded.toLocaleString()} result${insights.totals.reviewNeeded === 1 ? "" : "s"} awaiting review`
+        : "No open review pressure";
+
   return (
     <Stack spacing={2.5}>
-      <PageTitle title="Compliance Dashboard" subtitle="Operational overview of sanctions screening performance." />
+      <PageTitle title="Compliance Dashboard" subtitle="Screening posture, session reports, and review signals in one workspace." />
 
-
-
-      <Card sx={{ p: 2 }}>
-        <Stack spacing={1.5}>
-          <Typography variant="h6">Dashboard Insights</Typography>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1.2} alignItems={{ xs: "stretch", md: "center" }}>
-            <ToggleButtonGroup
-              size="small"
-              exclusive
-              value={insightWindow}
-              onChange={(_, value: InsightWindow | null) => value && setInsightWindow(value)}
-            >
-              <ToggleButton value="all">All</ToggleButton>
-              <ToggleButton value="weekly">Weekly</ToggleButton>
-              <ToggleButton value="monthly">Monthly</ToggleButton>
-              <ToggleButton value="custom">Custom Date</ToggleButton>
-            </ToggleButtonGroup>
-
-            {insightWindow === "custom" && (
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                <TextField
-                  size="small"
-                  type="date"
-                  label="From"
-                  value={fromDate}
-                  onChange={(event) => setFromDate(event.target.value)}
-                  InputLabelProps={{ shrink: true }}
+      <DashboardSurface
+        sx={{
+          overflow: "hidden",
+          background:
+            theme.palette.mode === "dark"
+              ? `linear-gradient(135deg, ${alpha("#162234", 0.92)}, ${alpha("#111820", 0.98)})`
+              : `linear-gradient(135deg, ${alpha("#ffffff", 0.98)}, ${alpha("#edf4f1", 0.88)})`,
+        }}
+      >
+        <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>
+          <Grid2 container spacing={2.5} alignItems="center">
+            <Grid2 size={{ xs: 12, lg: 7 }}>
+              <Stack spacing={1.35}>
+                <Chip
+                  icon={<ShieldOutlinedIcon />}
+                  label={rangeLabel}
+                  variant="outlined"
+                  sx={{ width: "fit-content", borderRadius: "8px", fontWeight: 700 }}
                 />
-                <TextField
-                  size="small"
-                  type="date"
-                  label="To"
-                  value={toDate}
-                  onChange={(event) => setToDate(event.target.value)}
-                  InputLabelProps={{ shrink: true }}
-                />
+                <Box>
+                  <Typography variant="h4" sx={{ fontWeight: 850, letterSpacing: 0 }}>
+                    Session-first review desk
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 720, mt: 0.6 }}>
+                    {priorityMessage} across {insights.totals.sessions.toLocaleString()} completed sessions.
+                  </Typography>
+                </Box>
               </Stack>
-            )}
-          </Stack>
-          <Grid2 container spacing={2}>
-            <Grid2 size={{ xs: 12, sm: 6, lg: 3 }}>
-              <KpiCard label="Total Screenings" value={insights.totals.entitiesProcessed} />
             </Grid2>
-            <Grid2 size={{ xs: 12, sm: 6, lg: 3 }}>
-              <KpiCard label="Matches Found" value={insights.totals.flagged} />
-            </Grid2>
-            <Grid2 size={{ xs: 12, sm: 6, lg: 3 }}>
-              <KpiCard label="Cleared Results" value={insights.totals.clear} />
-            </Grid2>
-            <Grid2 size={{ xs: 12, sm: 6, lg: 3 }}>
-              <KpiCard label="Pending Reviews" value={insights.totals.reviewNeeded} />
-            </Grid2>
-            <Grid2 size={{ xs: 12, sm: 6, lg: 3 }}>
-              <MuiTooltip title={metricHelp["Match Rate"]} arrow>
-                <span style={{ display: "block", height: "100%" }}>
-                  <Card sx={{ border: 1, borderColor: "divider", height: "100%" }}>
-                    <CardContent>
-                      <Typography variant="body2" color="text.secondary">Match Rate</Typography>
-                      <Typography variant="h5">{insights.totals.matchRate}%</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Based on {insights.totals.entitiesProcessed.toLocaleString()} entities screened
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </span>
-              </MuiTooltip>
+
+            <Grid2 size={{ xs: 12, lg: 5 }}>
+              <Stack spacing={1.2} alignItems={{ xs: "stretch", lg: "flex-end" }}>
+                <ToggleButtonGroup
+                  size="small"
+                  exclusive
+                  value={insightWindow}
+                  onChange={(_, value: InsightWindow | null) => value && setInsightWindow(value)}
+                  sx={{
+                    flexWrap: "wrap",
+                    justifyContent: { xs: "flex-start", lg: "flex-end" },
+                    gap: 0.75,
+                    "& .MuiToggleButton-root": {
+                      border: 1,
+                      borderColor: "divider",
+                      borderRadius: "8px !important",
+                      px: 1.45,
+                      fontWeight: 700,
+                    },
+                  }}
+                >
+                  <ToggleButton value="all">All</ToggleButton>
+                  <ToggleButton value="weekly">7 Days</ToggleButton>
+                  <ToggleButton value="monthly">Monthly</ToggleButton>
+                  <ToggleButton value="custom">Custom</ToggleButton>
+                </ToggleButtonGroup>
+
+                {insightWindow === "custom" && (
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ width: { xs: "100%", lg: "auto" } }}>
+                    <TextField
+                      size="small"
+                      type="date"
+                      label="From"
+                      value={fromDate}
+                      onChange={(event) => setFromDate(event.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    <TextField
+                      size="small"
+                      type="date"
+                      label="To"
+                      value={toDate}
+                      onChange={(event) => setToDate(event.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  </Stack>
+                )}
+              </Stack>
             </Grid2>
           </Grid2>
 
-          <Grid2 container spacing={2}>
-            <Grid2 size={{ xs: 12, lg: 6 }}>
-              <Card sx={{ p: 2, height: 320 }}>
-                <Typography variant="h6" sx={{ mb: 1.5 }}>
-                  Flagged / Review / Clear
-                </Typography>
+          <Grid2 container spacing={1.5} sx={{ mt: 2.5 }}>
+            <Grid2 size={{ xs: 6, lg: 3 }}>
+              <KpiCard
+                label="Entities Screened"
+                value={insights.totals.entitiesProcessed}
+                icon={<AssessmentOutlinedIcon fontSize="small" />}
+                tone="primary"
+                supportingText={`${insights.totals.sessions.toLocaleString()} sessions`}
+              />
+            </Grid2>
+            <Grid2 size={{ xs: 6, lg: 3 }}>
+              <KpiCard
+                label="Matches Found"
+                value={insights.totals.flagged}
+                icon={<FlagOutlinedIcon fontSize="small" />}
+                tone="error"
+                supportingText={`${insights.totals.matchRate}% match rate`}
+              />
+            </Grid2>
+            <Grid2 size={{ xs: 6, lg: 3 }}>
+              <KpiCard
+                label="Needs Review"
+                value={insights.totals.reviewNeeded}
+                icon={<PendingActionsOutlinedIcon fontSize="small" />}
+                tone="warning"
+                supportingText={`${insights.totals.reviewRate}% review rate`}
+              />
+            </Grid2>
+            <Grid2 size={{ xs: 6, lg: 3 }}>
+              <KpiCard
+                label="Clear Results"
+                value={insights.totals.clear}
+                icon={<GppGoodOutlinedIcon fontSize="small" />}
+                tone="success"
+                supportingText={insights.latestRun ? `Latest ${formatRunDate(insights.latestRun.startedAt)}` : "No sessions yet"}
+              />
+            </Grid2>
+          </Grid2>
+        </CardContent>
+      </DashboardSurface>
+
+      <Grid2 container spacing={2.5} alignItems="stretch">
+        <Grid2 size={{ xs: 12, xl: 8 }}>
+          <DashboardSurface sx={{ p: { xs: 1.5, md: 2 }, minHeight: 620 }}>
+            <ScreeningRunsPanel
+              title="Session Reports"
+              subtitle={`${filteredRuns.length.toLocaleString()} completed sessions in ${rangeLabel.toLowerCase()}.`}
+              tableHeight={520}
+              runsOverride={filteredRuns}
+              loadingOverride={loading}
+              emptyMessage="No completed screening sessions match this date range."
+            />
+          </DashboardSurface>
+        </Grid2>
+
+        <Grid2 size={{ xs: 12, xl: 4 }}>
+          <Stack spacing={2.5} sx={{ height: "100%" }}>
+            <DashboardSurface>
+              <CardContent sx={{ p: 2.25 }}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                  <Box>
+                    <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>
+                      Review Priority
+                    </Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                      {priorityMessage}
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      width: 42,
+                      height: 42,
+                      display: "grid",
+                      placeItems: "center",
+                      borderRadius: "8px",
+                      color: toneColors.error,
+                      bgcolor: alpha(toneColors.error, 0.12),
+                    }}
+                  >
+                    <WarningAmberOutlinedIcon />
+                  </Box>
+                </Stack>
+
+                <Divider sx={{ my: 1.8 }} />
+
+                <Stack spacing={1.4}>
+                  <Box>
+                    <Stack direction="row" justifyContent="space-between" spacing={1}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Flagged
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {insights.totals.flagged.toLocaleString()}
+                      </Typography>
+                    </Stack>
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min(insights.totals.matchRate, 100)}
+                      sx={{
+                        mt: 0.7,
+                        height: 9,
+                        borderRadius: 999,
+                        bgcolor: alpha(toneColors.error, 0.12),
+                        "& .MuiLinearProgress-bar": { borderRadius: 999, bgcolor: toneColors.error },
+                      }}
+                    />
+                  </Box>
+                  <Box>
+                    <Stack direction="row" justifyContent="space-between" spacing={1}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        Review Queue
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {insights.totals.reviewNeeded.toLocaleString()}
+                      </Typography>
+                    </Stack>
+                    <LinearProgress
+                      variant="determinate"
+                      value={Math.min(insights.totals.reviewRate, 100)}
+                      sx={{
+                        mt: 0.7,
+                        height: 9,
+                        borderRadius: 999,
+                        bgcolor: alpha(toneColors.warning, 0.14),
+                        "& .MuiLinearProgress-bar": { borderRadius: 999, bgcolor: toneColors.warning },
+                      }}
+                    />
+                  </Box>
+                </Stack>
+              </CardContent>
+            </DashboardSurface>
+
+            <DashboardSurface sx={{ flex: 1, minHeight: 312 }}>
+              <CardContent sx={{ p: 2.25, height: "100%" }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+                  <Box>
+                    <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>
+                      Outcome Mix
+                    </Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                      Flagged, review, clear
+                    </Typography>
+                  </Box>
+                  <FactCheckOutlinedIcon color="action" />
+                </Stack>
                 {loading ? (
-                  <Skeleton variant="rounded" height={240} />
+                  <Skeleton variant="rounded" height={220} sx={{ borderRadius: "8px" }} />
+                ) : insights.riskDistribution.every((item) => item.value === 0) ? (
+                  <EmptyChartState label="No outcomes available in this range." />
                 ) : (
-                  <ResponsiveContainer width="100%" height={240}>
+                  <ResponsiveContainer width="100%" height={220}>
                     <PieChart>
                       <Pie
                         data={insights.riskDistribution}
@@ -358,178 +695,163 @@ export function DashboardPage() {
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={82}
+                        innerRadius={54}
+                        outerRadius={84}
                         paddingAngle={3}
                         label={renderPieLabel}
                       >
-                        <Cell fill="#d14343" />
-                        <Cell fill="#c77700" />
-                        <Cell fill="#22a06b" />
+                        <Cell fill={toneColors.error} />
+                        <Cell fill={toneColors.warning} />
+                        <Cell fill={toneColors.success} />
                       </Pie>
                       <Tooltip formatter={(value, name) => [value, name]} />
                       <Legend formatter={(value, entry) => `${value}: ${(entry.payload as { value: number }).value}`} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
-              </Card>
-            </Grid2>
+              </CardContent>
+            </DashboardSurface>
 
-            <Grid2 size={{ xs: 12, lg: 6 }}>
-              <Card sx={{ p: 2, height: 320 }}>
-                <Typography variant="h6" sx={{ mb: 1.5 }}>
-                  Top Lists Used
-                </Typography>
-                {loading || topListsQuery.isLoading ? (
-                  <Skeleton variant="rounded" height={240} />
-                ) : (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={topListsQuery.data ?? []}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
-                      <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                      <Tooltip formatter={(value, name) => [value, name === "value" ? "Count" : name]} />
-                      <Bar dataKey="value" name="Count" fill="#0b5ed7" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </Card>
-            </Grid2>
-          </Grid2>
-        </Stack>
-      </Card>
+            <DashboardSurface>
+              <CardContent sx={{ p: 2.25 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                  <Box>
+                    <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>
+                      Lists Used
+                    </Typography>
+                    <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                      Top sources
+                    </Typography>
+                  </Box>
+                  <CalendarMonthOutlinedIcon color="action" />
+                </Stack>
+                <SourceRanking data={topListsQuery.data ?? []} loading={loading || topListsQuery.isLoading} />
+              </CardContent>
+            </DashboardSurface>
+          </Stack>
+        </Grid2>
+      </Grid2>
 
-      <Grid2 container spacing={2}>
-        <Grid2 size={{ xs: 12, lg: 7 }}>
-          <Card sx={{ p: 2, height: 360 }}>
-            <Typography variant="h6" sx={{ mb: 1.5 }}>
-              Screening Trends
-            </Typography>
-            {loading ? (
-              <Skeleton variant="rounded" height={280} />
-            ) : (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={insights.trend} barCategoryGap="35%">
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={(value: string) => {
-                      if (insightWindow === "monthly") {
+      <Grid2 container spacing={2.5}>
+        <Grid2 size={{ xs: 12, lg: 8 }}>
+          <DashboardSurface>
+            <CardContent sx={{ p: 2.25 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                <Box>
+                  <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>
+                    Activity
+                  </Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Screening volume over time
+                  </Typography>
+                </Box>
+                <TrendingUpOutlinedIcon color="action" />
+              </Stack>
+              {loading ? (
+                <Skeleton variant="rounded" height={294} sx={{ borderRadius: "8px" }} />
+              ) : insights.trend.length === 0 ? (
+                <EmptyChartState label="No trend data available in this range." />
+              ) : (
+                <ResponsiveContainer width="100%" height={294}>
+                  <BarChart data={insights.trend} barCategoryGap="35%">
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={alpha(theme.palette.text.primary, 0.12)} />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={(value: string) => {
+                        if (insightWindow === "monthly") {
+                          try {
+                            return format(parseISO(`${value}-01`), "MMM yyyy");
+                          } catch {
+                            return value;
+                          }
+                        }
                         try {
-                          return format(parseISO(`${value}-01`), "MMM yyyy");
+                          return format(parseISO(value), "MMM d");
                         } catch {
                           return value;
                         }
-                      }
-                      try {
-                        return format(parseISO(value), "MMM d");
-                      } catch {
-                        return value;
-                      }
-                    }}
-                    tick={{ fontSize: 12 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    formatter={(value, name) => [value, name === "screenings" ? "Entities Screened" : "Flagged"]}
-                    labelFormatter={(label: string) => {
-                      if (insightWindow === "monthly") {
+                      }}
+                      tick={{ fontSize: 12, fill: theme.palette.text.secondary }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 12, fill: theme.palette.text.secondary }}
+                    />
+                    <Tooltip
+                      formatter={(value, name) => [value, name === "screenings" ? "Entities Screened" : "Flagged"]}
+                      labelFormatter={(label: string) => {
+                        if (insightWindow === "monthly") {
+                          try {
+                            return format(parseISO(`${label}-01`), "MMMM yyyy");
+                          } catch {
+                            return label;
+                          }
+                        }
                         try {
-                          return format(parseISO(`${label}-01`), "MMMM yyyy");
+                          return format(parseISO(label), "MMM d, yyyy");
                         } catch {
                           return label;
                         }
-                      }
-                      try {
-                        return format(parseISO(label), "MMM d, yyyy");
-                      } catch {
-                        return label;
-                      }
-                    }}
-                  />
-                  <Legend formatter={(value) => (value === "screenings" ? "Entities Screened" : "Flagged")} />
-                  <Bar dataKey="screenings" name="screenings" fill="#0b5ed7" radius={[6, 6, 0, 0]} />
-                  <Bar dataKey="matches" name="matches" fill="#d14343" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </Card>
+                      }}
+                    />
+                    <Legend formatter={(value) => (value === "screenings" ? "Entities Screened" : "Flagged")} />
+                    <Bar dataKey="screenings" name="screenings" fill={toneColors.primary} radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="matches" name="matches" fill={toneColors.error} radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </DashboardSurface>
         </Grid2>
 
-      </Grid2>
-
-      <Grid2 container spacing={2}>
-        <Grid2 size={{ xs: 12, lg: 12 }}>
-          <Card sx={{ p: 2, height: 320 }}>
-            <Typography variant="h6" sx={{ mb: 1.5 }}>
-              Run Status Mix
-            </Typography>
-            {loading ? (
-              <Skeleton variant="rounded" height={240} />
-            ) : (
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie
-                    data={insights.statusDistribution}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={45}
-                    outerRadius={82}
-                    paddingAngle={3}
-                    label={renderPieLabel}
-                  >
-                    {insights.statusDistribution.map((_, idx) => (
-                      <Cell key={idx} fill={chartColors[(idx + 2) % chartColors.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value, name) => [value, name]} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </Card>
+        <Grid2 size={{ xs: 12, lg: 4 }}>
+          <DashboardSurface>
+            <CardContent sx={{ p: 2.25 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+                <Box>
+                  <Typography variant="overline" color="text.secondary" sx={{ fontWeight: 800 }}>
+                    Run Health
+                  </Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 800 }}>
+                    Completed vs failed
+                  </Typography>
+                </Box>
+                <AssessmentOutlinedIcon color="action" />
+              </Stack>
+              {loading ? (
+                <Skeleton variant="rounded" height={294} sx={{ borderRadius: "8px" }} />
+              ) : insights.statusDistribution.every((item) => item.value === 0) ? (
+                <EmptyChartState label="No completed runs in this range." />
+              ) : (
+                <ResponsiveContainer width="100%" height={294}>
+                  <PieChart>
+                    <Pie
+                      data={insights.statusDistribution}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={58}
+                      outerRadius={88}
+                      paddingAngle={3}
+                      label={renderPieLabel}
+                    >
+                      <Cell fill={toneColors.primary} />
+                      <Cell fill={toneColors.error} />
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [value, name]} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </CardContent>
+          </DashboardSurface>
         </Grid2>
       </Grid2>
-
-      <ScreeningRunsPanel
-        title="Results"
-        subtitle="All screening runs on dashboard. Click anywhere on a row to open detailed results."
-        tableHeight={520}
-      />    </Stack>
+    </Stack>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

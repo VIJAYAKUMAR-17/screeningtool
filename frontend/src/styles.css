@@ -8,12 +8,19 @@ body,
 }
 
 body {
-  background: radial-gradient(circle at top left, rgba(44, 99, 184, 0.12), transparent 50%),
-    radial-gradient(circle at bottom right, rgba(43, 143, 114, 0.1), transparent 55%);
+  background-color: #eef3f8;
+  background-image:
+    linear-gradient(rgba(20, 37, 54, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 37, 54, 0.045) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(226, 236, 242, 0.7));
+  background-size:
+    28px 28px,
+    28px 28px,
+    auto;
+  background-attachment: fixed;
 }
 
 * {
   box-sizing: border-box;
 }
-
 

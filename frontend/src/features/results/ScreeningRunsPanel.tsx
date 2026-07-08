@@ -21,6 +21,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -47,8 +48,6 @@ import { http } from "@/services/http";
 import { RunRecord, ScreeningResult, Tier2ScreeningResult } from "@/types/api";
 
 type ResultRow = ScreeningResult & { id: number };
-
-const chartColors = ["#22a06b", "#c77700", "#d14343", "#0b5ed7"];
 
 const vendorColumns: GridColDef<ResultRow>[] = [
   {
@@ -113,6 +112,20 @@ function OutcomeSummary({ run }: { run: RunRecord }) {
       )}
     </Stack>
   );
+}
+
+function RunStatusChip({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
+  const config =
+    normalized === "failed"
+      ? { label: "Failed", color: "error" as const }
+      : normalized === "running"
+        ? { label: "Running", color: "info" as const }
+        : normalized === "pending"
+          ? { label: "Pending", color: "default" as const }
+          : { label: "Completed", color: "success" as const };
+
+  return <Chip size="small" label={config.label} color={config.color} variant={normalized === "pending" ? "outlined" : "filled"} />;
 }
 
 function RunDetailsInsights({ run, results }: { run: RunRecord; results: ScreeningResult[] }) {
@@ -304,6 +317,9 @@ type ScreeningRunsPanelProps = {
   subtitle?: string;
   showPageTitle?: boolean;
   tableHeight?: number;
+  runsOverride?: RunRecord[];
+  loadingOverride?: boolean;
+  emptyMessage?: string;
 };
 
 export function ScreeningRunsPanel({
@@ -311,11 +327,16 @@ export function ScreeningRunsPanel({
   subtitle = "Click anywhere on a result row to open Tier 1 and Tier 2 details.",
   showPageTitle = false,
   tableHeight = 520,
+  runsOverride,
+  loadingOverride = false,
+  emptyMessage = "No screening runs found.",
 }: ScreeningRunsPanelProps) {
+  const usesExternalRuns = Array.isArray(runsOverride);
   const runsQuery = useQuery({
     queryKey: ["results"],
     queryFn: api.getScreeningRuns,
     placeholderData: (previousData) => previousData,
+    enabled: !usesExternalRuns,
   });
 
   const [stableRuns, setStableRuns] = useState<RunRecord[]>([]);
@@ -331,17 +352,20 @@ export function ScreeningRunsPanel({
   }, [runsQuery.data]);
 
   const runs = useMemo(() => {
+    if (usesExternalRuns) {
+      return runsOverride;
+    }
     if (Array.isArray(runsQuery.data) && (runsQuery.data.length > 0 || stableRuns.length === 0)) {
       return runsQuery.data;
     }
     return stableRuns;
-  }, [runsQuery.data, stableRuns]);
+  }, [runsOverride, runsQuery.data, stableRuns, usesExternalRuns]);
 
   const [search, setSearch] = useState("");
   const [selectedRun, setSelectedRun] = useState<RunRecord | null>(null);
   const queryClient = useQueryClient();
 
-  const isInitialLoading = runsQuery.isLoading && runs.length === 0;
+  const isInitialLoading = usesExternalRuns ? loadingOverride && runs.length === 0 : runsQuery.isLoading && runs.length === 0;
 
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
@@ -387,7 +411,12 @@ export function ScreeningRunsPanel({
   });
 
   const filtered = useMemo(
-    () => runs.filter((run) => run.customerName.toLowerCase().includes(search.toLowerCase())),
+    () =>
+      runs.filter((run) => {
+        const query = search.toLowerCase();
+        const haystack = `${run.runId} ${run.customerName} ${run.status}`.toLowerCase();
+        return haystack.includes(query);
+      }),
     [runs, search],
   );
 
@@ -404,6 +433,12 @@ export function ScreeningRunsPanel({
   const runColumns: GridColDef<RunRecord>[] = [
     { field: "runId", headerName: "Run #", width: 80 },
     { field: "customerName", headerName: "Customer", flex: 1, minWidth: 160 },
+    {
+      field: "status",
+      headerName: "Status",
+      width: 125,
+      renderCell: (params) => <RunStatusChip status={params.row.status} />,
+    },
     { field: "vendorsScreened", headerName: "Vendors", width: 90, align: "center", headerAlign: "center" },
     {
       field: "outcomes",
@@ -453,29 +488,48 @@ export function ScreeningRunsPanel({
       {showPageTitle ? (
         <PageTitle title={title} subtitle={subtitle} />
       ) : (
-        <Stack spacing={0.4}>
-          <Typography variant="h6">{title}</Typography>
+        <Stack spacing={0.5}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            {title}
+          </Typography>
           <Typography variant="body2" color="text.secondary">
             {subtitle}
           </Typography>
         </Stack>
       )}
 
-      <TextField
-        fullWidth
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by customer name..."
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <FilterListOutlinedIcon />
-            </InputAdornment>
-          ),
-        }}
-      />
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.2} alignItems={{ xs: "stretch", sm: "center" }}>
+        <TextField
+          fullWidth
+          size="small"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search customer, run, or status..."
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <FilterListOutlinedIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+        />
+        <Chip
+          label={`${filtered.length.toLocaleString()} session${filtered.length === 1 ? "" : "s"}`}
+          variant="outlined"
+          sx={{ borderRadius: "8px", fontWeight: 700, justifyContent: "center", minWidth: 112 }}
+        />
+      </Stack>
 
-      <Box sx={{ height: tableHeight }}>
+      <Box
+        sx={{
+          height: tableHeight,
+          overflow: "hidden",
+          border: 1,
+          borderColor: "divider",
+          borderRadius: "8px",
+          bgcolor: "background.paper",
+        }}
+      >
         <DataGrid
           loading={isInitialLoading}
           rows={filtered}
@@ -484,8 +538,26 @@ export function ScreeningRunsPanel({
           pageSizeOptions={[10, 25, 50]}
           disableRowSelectionOnClick
           onRowClick={(params) => setSelectedRun(params.row)}
+          localeText={{ noRowsLabel: emptyMessage }}
           sx={{
-            "& .MuiDataGrid-row": { cursor: "pointer" },
+            border: 0,
+            "& .MuiDataGrid-columnHeaders": {
+              bgcolor: (theme) => alpha(theme.palette.text.primary, theme.palette.mode === "dark" ? 0.08 : 0.04),
+              borderBottomColor: "divider",
+            },
+            "& .MuiDataGrid-columnHeaderTitle": {
+              fontWeight: 800,
+            },
+            "& .MuiDataGrid-row": {
+              cursor: "pointer",
+              transition: "background-color 140ms ease, transform 140ms ease",
+            },
+            "& .MuiDataGrid-row:hover": {
+              bgcolor: (theme) => alpha(theme.palette.primary.main, theme.palette.mode === "dark" ? 0.14 : 0.06),
+            },
+            "& .MuiDataGrid-cell": {
+              borderBottomColor: (theme) => alpha(theme.palette.divider, 0.72),
+            },
             "& .MuiDataGrid-cell:focus, & .MuiDataGrid-cell:focus-within": { outline: "none" },
             "& .MuiDataGrid-columnHeader:focus, & .MuiDataGrid-columnHeader:focus-within": { outline: "none" },
             "& .MuiDataGrid-row.Mui-selected, & .MuiDataGrid-row.Mui-selected:hover": { backgroundColor: "inherit" },
@@ -564,4 +636,3 @@ export function ScreeningRunsPanel({
     </Stack>
   );
 }
-
