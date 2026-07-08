@@ -28,3 +28,22 @@ def get_db():
 def init_db():
     from database import models  # noqa: F401 — ensures models are registered on Base
     Base.metadata.create_all(bind=engine)
+    _apply_lightweight_migrations()
+
+
+# create_all never alters existing tables, so columns added to models after the
+# first deploy must be back-filled here until Alembic is adopted.
+_MIGRATION_STATEMENTS = [
+    "ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS sources_checked JSON",
+    "ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS data_mode VARCHAR",
+]
+
+
+def _apply_lightweight_migrations():
+    from sqlalchemy import text
+
+    if _is_sqlite:
+        return
+    with engine.begin() as conn:
+        for statement in _MIGRATION_STATEMENTS:
+            conn.execute(text(statement))

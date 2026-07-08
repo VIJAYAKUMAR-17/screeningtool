@@ -93,6 +93,9 @@ def _build_summary_sheet(ws, run: ScreeningRun):
     row("Generated At",       datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"))
     row("Screening Duration", f"{run.elapsed_seconds:.2f} seconds" if run.elapsed_seconds else "—")
     row("Run Status",         run.status.value.upper())
+    row("Data Source",        "Live CSL API (data.trade.gov)" if run.data_mode == "live_csl"
+                              else ("Local database (last ingested copy)" if run.data_mode == "database" else "-"))
+    row("Lists Checked",      ", ".join(run.sources_checked or []) or "Not recorded (run predates coverage tracking)")
 
     ws.append([])
     flagged = sum(1 for r in run.results if r.status == MatchStatus.FLAGGED)

@@ -54,6 +54,8 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
         "run_id": run.id,
         "customer_name": run.customer_name,
         "status": run.status.value,
+        "data_mode": run.data_mode,
+        "sources_checked": run.sources_checked or [],
         "vendors_screened": run.vendor_names,
         "started_at": run.started_at.isoformat(),
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,

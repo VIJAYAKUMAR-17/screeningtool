@@ -93,6 +93,14 @@ def _count_statuses(run: ScreeningRun) -> tuple[int, int, int]:
     return flagged, review, clear
 
 
+def _data_mode_label(run: ScreeningRun) -> str:
+    if run.data_mode == "live_csl":
+        return "Live CSL API (data.trade.gov)"
+    if run.data_mode == "database":
+        return "Local database (last ingested copy)"
+    return "-"
+
+
 def _summary_table(run: ScreeningRun) -> Table:
     flagged, review, clear = _count_statuses(run)
 
@@ -101,7 +109,7 @@ def _summary_table(run: ScreeningRun) -> Table:
         ["Screening Duration", f"{run.elapsed_seconds:.2f}s" if run.elapsed_seconds else "-", "Generated At", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")],
         ["Vendors Screened", str(len(run.results)), "Run Status", run.status.value.upper()],
         ["Flagged", str(flagged), "Review Needed", str(review)],
-        ["Clear", str(clear), "", ""],
+        ["Clear", str(clear), "Data Source", _data_mode_label(run)],
     ]
 
     t = Table(data, colWidths=[3.8 * cm, 4.8 * cm, 3.8 * cm, 4.8 * cm])
@@ -382,6 +390,9 @@ def generate_pdf(run: ScreeningRun) -> bytes:
 
     story.append(Paragraph("Screening Summary", styles["section"]))
     story.append(_summary_table(run))
+    lists_checked = ", ".join(run.sources_checked or []) or "Not recorded (run predates coverage tracking)"
+    story.append(Spacer(1, 0.15 * cm))
+    story.append(Paragraph(f"<b>Lists checked:</b> {_clean_text(lists_checked)}", styles["body"]))
     story.append(Spacer(1, 0.4 * cm))
 
     story.append(Paragraph("Visual Insights", styles["section"]))

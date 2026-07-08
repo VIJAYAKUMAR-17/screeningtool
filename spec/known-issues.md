@@ -1,5 +1,23 @@
-ive end-to-end QA testing.
+# Known Issues - Screening Tool
+
+Last updated: 2026-07-08
+Sources: full code review (backend engine, API/ingestion, frontend) and live end-to-end QA testing.
 Status values: FIXED (deployed and verified live), OPEN (not started).
+
+## 1. Fixed and live
+
+| #   | Issue | Fix |
+| --- | ----- | --- |
+| F1  | Customer name was screened as an entity, producing bogus "Match Found" rows and inflating counts | Customer name is metadata only; just vendors are screened (`backend/api/routes/screen.py`) |
+| F2  | CSL API relevance score trusted as match confidence; "demo" flagged 90% against "Hong Kong DEMX Co., Ltd." | All matches re-scored locally with rapidfuzz against real names and aliases (`backend/services/csl_client.py`) |
+| F3  | Generic words ("International", "Company") drove false flags | Generic corporate tokens down-weighted; such cases land in Review instead of Flagged |
+| F4  | True positives missed: "Rosneft" scored 53 vs "Rosneft Oil Company" | Verbatim token containment boosts to review/flag level; Rosneft now flags at 100 |
+| F5  | Flag/review thresholds hardcoded (85/70) in the route | Thresholds come from `config.py` settings |
+| F6  | No input validation: empty or 1-2 character names screened and produced garbage hits | Names under 3 normalized characters rejected with 422; vendors deduped; vendor list capped at 500 |
+| F7  | Tier 2 batch toast claimed success even when rows failed (stale state read) | Per-row outcomes returned and counted (`frontend/.../ScreeningPage.tsx`) |
+| F8  | Deployed bundle called 127.0.0.1:8011; all buttons failed | Frontend built with same-origin API base and rebuilt in CI on every deploy |
+| F9  | Repo tracked node_modules (58k files), build outputs, logs, sanctions.db, and .env files with a live API key | .gitignore added, files untracked; NOTE: rotate the CSL key since it remains in old git history |
+| F10 | No coverage disclosure: "Clear" never said which lists were checked, live-to-DB fallback was silent, List column truncated | Runs persist `sources_checked` + `data_mode`; results banner, JSON report, PDF, and Excel all state lists checked and data source; fallback shows a warning toast; List column widened |
 
 ## 2. Critical - open
 
@@ -8,7 +26,7 @@ Status values: FIXED (deployed and verified live), OPEN (not started).
 | C1  | No authentication or tenancy                            | Every endpoint is public; anyone with the URL can screen, read all history, and download all reports; dashboard aggregates every user's runs globally                                                 |
 | C2  | Failed/running/zero-result runs count in dashboard KPIs | QA posted 500 vendors and inflated Total Screenings to 1,026 with no results; KPI queries should filter run status; QA test pollution still sits in the database                                      |
 | C3  | Excel formula injection                                 | Vendor names like `=SUM(1)` export as live formulas (`reporter/excel.py`); prefix-escape `= + - @` as text                                                                                            |
-| C4  | Silent failure produces false CLEAR                     | Tier 2 provider outages log a warning and still report low risk; ingest errors silently keep stale data; live-to-DB fallback happens without telling the user which source actually served the result |
+| C4  | Silent failure produces false CLEAR                     | Tier 2 provider outages log a warning and still report low risk; ingest errors silently keep stale data. (Partially addressed by F10: the live-to-DB fallback now warns the user and results state their data source) |
 | C5  | Sanctions data freshness is broken in DB mode           | auto-sync config flags are dead code; UN list is a static repo file in a deprecated format; no EU or BIS ingester exists, so DB mode misses those lists entirely                                      |
 
 ## 3. Major - open
@@ -27,7 +45,7 @@ Status values: FIXED (deployed and verified live), OPEN (not started).
 | M10 | Frontend min-length message wrong            | One-character vendor shows "Company/vendor name is required" instead of stating the 3-character minimum                                                                                                                              |
 | M11 | Tier 2 blocks the event loop                 | Synchronous OFAC CSV downloads and CSL calls inside async handlers stall all other requests; OFAC files re-downloaded on every request with no cache                                                                                 |
 | M12 | Only the top match is persisted              | The full candidate list exists only in the HTTP response; a compliance tool must retain all evidence                                                                                                                                 |
-| M13 | No analyst disposition workflow              | No cleared-by/reviewed-at/false-positive fields; runs do not record which lists and thresholds were used, so results are not reproducible                                                                                            |
+| M13 | No analyst disposition workflow              | No cleared-by/reviewed-at/false-positive fields. (Partially addressed by F10: runs now record lists and data mode; thresholds used are still not persisted)                                                                          |
 | M14 | CORS wide open and no rate limiting          | `allow_origins=["*"]`; expensive endpoints are unthrottled                                                                                                                                                                           |
 | M15 | Destructive list ingest                      | clear-then-insert without a transaction; a mid-ingest failure leaves the list empty and produces false CLEARs                                                                                                                        |
 | M16 | Dashboard loads all runs into memory         | Stats computed in Python over the whole table (and the frontend recomputes from a capped limit=100 fetch); needs SQL aggregation                                                                                                     |

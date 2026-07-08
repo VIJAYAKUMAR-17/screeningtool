@@ -1,5 +1,6 @@
 import { formatISO, subDays } from "date-fns";
 import { saveAs } from "file-saver";
+import toast from "react-hot-toast";
 import {
   AuditLog,
   DashboardCharts,
@@ -220,6 +221,10 @@ export const api = {
         throw error;
       }
 
+      toast.error(
+        "Live sanctions list service is unreachable. Results below come from the local database copy, which may be out of date.",
+        { id: "live-fallback", duration: 8000 },
+      );
       const response = await http.post<ApiRecord>("/screen/", createRequestBody(false), {
         timeout: options.timeoutMs ?? 0,
       });
@@ -227,9 +232,15 @@ export const api = {
     }
 
     const resultsRaw = Array.isArray(data.results) ? (data.results as ApiRecord[]) : [];
+    const sourcesRaw = (data.screening_sources ?? {}) as ApiRecord;
     return {
       runId: num(data.run_id),
       elapsedSeconds: num(data.elapsed_seconds),
+      screeningSources: {
+        mode: (str(sourcesRaw.mode) as "live_csl" | "database" | "") ?? "",
+        listsChecked: Array.isArray(sourcesRaw.lists_checked) ? (sourcesRaw.lists_checked as string[]) : [],
+        checkedAt: str(sourcesRaw.checked_at),
+      },
       results: resultsRaw.map((item) => toResult(item)),
       summary: {
         flagged: num(data.flagged),

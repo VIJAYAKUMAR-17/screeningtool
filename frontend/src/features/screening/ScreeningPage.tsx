@@ -222,7 +222,7 @@ export function ScreeningPage() {
     { field: "status", headerName: "Status", width: 160, renderCell: (params) => <StatusChip status={params.row.status} /> },
     { field: "matchScore", headerName: "Score", width: 100, valueFormatter: (value) => (typeof value === "number" ? `${value}%` : "-") },
     { field: "matchedName", headerName: "Matched Entity", flex: 1, minWidth: 200, valueGetter: (_, row) => row.matchedName ?? "-" },
-    { field: "ofacSource", headerName: "List", width: 100, valueGetter: (_, row) => row.ofacSource ?? "-" },
+    { field: "ofacSource", headerName: "List", flex: 1, minWidth: 220, valueGetter: (_, row) => row.ofacSource ?? "-" },
     { field: "matchType", headerName: "Match Type", width: 130, valueGetter: (_, row) => row.matchType ?? "-" },
     {
       field: "tier2",
@@ -363,6 +363,16 @@ const tier2Entities = Object.keys(tier2ByEntity);
             <Alert severity="info" sx={{ mb: 2 }}>
               Run {lastResult.runId} completed in {lastResult.elapsedSeconds.toFixed(2)}s. Tier 2 ready for {readyCount}/{resultRows.length} rows. Click the eye icon to view details.
             </Alert>
+            {lastResult.screeningSources && lastResult.screeningSources.listsChecked.length > 0 && (
+              <Alert severity={lastResult.screeningSources.mode === "database" ? "warning" : "success"} sx={{ mb: 2 }}>
+                Screened against: {lastResult.screeningSources.listsChecked.join(", ")}
+                {" via "}
+                {lastResult.screeningSources.mode === "live_csl"
+                  ? "the live US Consolidated Screening List API"
+                  : "the local database copy (may be older than the live lists)"}
+                . UN, EU, and UK lists are not yet covered.
+              </Alert>
+            )}
             <Box sx={{ height: 420 }}>
               <DataGrid
                 rows={resultRows}

@@ -127,12 +127,27 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
     if not names_to_screen:
         raise HTTPException(status_code=422, detail="No valid company names to screen.")
 
-    run = run_repo.create(customer_name=req.customer_name, vendor_names=names_to_screen)
+    requested_lists = _normalize_lists(req.lists)
+
+    if req.live_ofac:
+        data_mode = "live_csl"
+        csl_sources = _resolve_csl_sources(req, requested_lists)
+        sources_checked = csl_sources or ["US Consolidated Screening List (all US lists: OFAC, BIS, State Dept)"]
+    else:
+        data_mode = "database"
+        csl_sources = None
+        sources_checked = requested_lists or ["All lists ingested in local database"]
+
+    run = run_repo.create(
+        customer_name=req.customer_name,
+        vendor_names=names_to_screen,
+        sources_checked=sources_checked,
+        data_mode=data_mode,
+    )
     run_repo.update_status(run.id, RunStatus.RUNNING)
     start = time.perf_counter()
 
     try:
-        requested_lists = _normalize_lists(req.lists)
 
         all_vendors = vendor_repo.get_all()
         graph = SupplierGraph()
@@ -141,7 +156,6 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
         batch: dict[str, list[dict]] = {}
 
         if req.live_ofac:
-            csl_sources = _resolve_csl_sources(req, requested_lists)
             csl_filters = CSLSearchFilters(
                 sources=csl_sources,
                 types=_normalize_values(req.types, uppercase=False),
@@ -265,6 +279,11 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
         return {
             "run_id": run.id,
             "customer_name": req.customer_name,
+            "screening_sources": {
+                "mode": data_mode,
+                "lists_checked": sources_checked,
+                "checked_at": run.started_at.isoformat() + "Z",
+            },
             "elapsed_seconds": round(elapsed, 3),
             "total_vendors": len(names_to_screen),
             "flagged": sum(1 for r in results_out if r["status"] == "flagged"),

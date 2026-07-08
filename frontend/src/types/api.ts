@@ -46,9 +46,16 @@ export interface ScreeningResult {
   resultType?: "customer" | "vendor";
 }
 
+export interface ScreeningSources {
+  mode: "live_csl" | "database" | "";
+  listsChecked: string[];
+  checkedAt: string;
+}
+
 export interface ScreenResponse {
   runId: number;
   elapsedSeconds: number;
+  screeningSources?: ScreeningSources;
   results: ScreeningResult[];
   summary: {
     flagged: number;

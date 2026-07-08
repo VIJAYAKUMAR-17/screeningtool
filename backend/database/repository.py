@@ -101,8 +101,19 @@ class ScreeningRunRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, customer_name: str, vendor_names: list[str]) -> ScreeningRun:
-        run = ScreeningRun(customer_name=customer_name, vendor_names=vendor_names)
+    def create(
+        self,
+        customer_name: str,
+        vendor_names: list[str],
+        sources_checked: list[str] | None = None,
+        data_mode: str | None = None,
+    ) -> ScreeningRun:
+        run = ScreeningRun(
+            customer_name=customer_name,
+            vendor_names=vendor_names,
+            sources_checked=sources_checked or [],
+            data_mode=data_mode,
+        )
         self.db.add(run)
         self.db.commit()
         self.db.refresh(run)

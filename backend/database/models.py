@@ -78,6 +78,10 @@ class ScreeningRun(Base):
     id = Column(Integer, primary_key=True, index=True)
     customer_name = Column(String, nullable=True)
     vendor_names = Column(JSON, default=list)
+    # Coverage disclosure: which list sources were checked and via which data
+    # mode ("live_csl" or "database"), so every run is auditable/reproducible.
+    sources_checked = Column(JSON, default=list)
+    data_mode = Column(String, nullable=True)
     status = Column(SAEnum(RunStatus), default=RunStatus.PENDING)
     elapsed_seconds = Column(Float, nullable=True)
     ai_summary = Column(String, nullable=True)
