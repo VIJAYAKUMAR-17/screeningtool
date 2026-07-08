@@ -74,6 +74,8 @@ const toResult = (item: ApiRecord): ScreeningResult => ({
   matchType: typeof item.match_type === "string" ? item.match_type : null,
   rawMatchData: item.raw_match_data ?? item.all_matches ?? null,
   resultType: item.result_type === "customer" ? "customer" : "vendor",
+  country: typeof item.country === "string" ? item.country : null,
+  identifier: typeof item.identifier === "string" ? item.identifier : null,
 });
 
 const chunkArray = <T,>(items: T[], size: number): T[][] => {
@@ -241,7 +243,15 @@ export const api = {
         listsChecked: Array.isArray(sourcesRaw.lists_checked) ? (sourcesRaw.lists_checked as string[]) : [],
         checkedAt: str(sourcesRaw.checked_at),
       },
-      results: resultsRaw.map((item) => toResult(item)),
+      results: resultsRaw.map((item) => {
+        const result = toResult(item);
+        const source = payload.entities.find((entry) => entry.companyName.trim() === result.queriedName);
+        return {
+          ...result,
+          country: source?.country || result.country || null,
+          identifier: source?.identifier || result.identifier || null,
+        };
+      }),
       summary: {
         flagged: num(data.flagged),
         reviewNeeded: num(data.review_needed),

@@ -45,7 +45,7 @@ import { PageTitle } from "@/components/common/PageTitle";
 import { StatusChip } from "@/components/common/StatusChip";
 import { api } from "@/services/api";
 import { http } from "@/services/http";
-import { Tier2ScreeningResult } from "@/types/api";
+import { ScreenInput, Tier2ScreeningResult } from "@/types/api";
 import { screeningFormSchema, ScreeningFormValues } from "./screeningSchema";
 import { Tier2StructuredDetails } from "@/components/common/Tier2StructuredDetails";
 
@@ -124,14 +124,24 @@ export function ScreeningPage() {
     await Promise.all(ops);
   };
 
-  const runTier2ForEntity = async (runId: number, entityName: string): Promise<boolean> => {
+  const runTier2ForEntity = async (
+    runId: number,
+    entityName: string,
+    context: { country?: string; identifier?: string } = {},
+  ): Promise<boolean> => {
     setTier2LoadingByEntity((prev) => ({ ...prev, [entityName]: true }));
     setTier2ErrorByEntity((prev) => ({ ...prev, [entityName]: "" }));
 
     try {
       const { data } = await http.post<Tier2ScreeningResult>(
         "/tier2/screen",
-        { run_id: runId, primary_entity: entityName, include_adverse_media: true },
+        {
+          run_id: runId,
+          primary_entity: entityName,
+          country: context.country || undefined,
+          identifier: context.identifier || undefined,
+          include_adverse_media: true,
+        },
         { timeout: 0 },
       );
       setTier2ByEntity((prev) => ({ ...prev, [entityName]: data }));
@@ -144,12 +154,20 @@ export function ScreeningPage() {
     }
   };
 
-  const runAllTier2 = async (runId: number, names: string[]) => {
-    const uniqueNames = Array.from(new Set(names.map((n) => n.trim()).filter(Boolean)));
-    if (!uniqueNames.length) return;
+  const runAllTier2 = async (runId: number, entries: ScreenInput[]) => {
+    const byName = new Map<string, ScreenInput>();
+    for (const entry of entries) {
+      const name = entry.companyName.trim();
+      if (name && !byName.has(name)) byName.set(name, entry);
+    }
+    if (!byName.size) return;
 
     toast.loading("Tier 2 screening started for all rows", { id: "tier2-batch" });
-    const outcomes = await Promise.all(uniqueNames.map((name) => runTier2ForEntity(runId, name)));
+    const outcomes = await Promise.all(
+      Array.from(byName.entries()).map(([name, entry]) =>
+        runTier2ForEntity(runId, name, { country: entry.country, identifier: entry.identifier }),
+      ),
+    );
 
     const failed = outcomes.filter((ok) => !ok).length;
     if (failed > 0) {
@@ -170,8 +188,8 @@ export function ScreeningPage() {
       setTier2ErrorByEntity({});
       setActiveEntity(null);
 
-      const names = data.results.map((r) => r.queriedName);
-      await runAllTier2(data.runId, names);
+      const submittedEntries = form.getValues("entries");
+      await runAllTier2(data.runId, submittedEntries);
       await refreshDerivedScreens(data.runId);
     },
     onError: (err) => toast.error(err.message, { id: "screening" }),
@@ -203,7 +221,10 @@ export function ScreeningPage() {
     }
   };
 
-  const resultRows: ScreeningResultRow[] = lastResult?.results.map((r, idx) => ({ ...r, id: idx + 1 })) ?? [];
+  const resultRows: ScreeningResultRow[] = useMemo(
+    () => lastResult?.results.map((r, idx) => ({ ...r, id: idx + 1 })) ?? [],
+    [lastResult],
+  );
   const readyCount = useMemo(() => Object.keys(tier2ByEntity).length, [tier2ByEntity]);
 
   const resultColumns: GridColDef<ScreeningResultRow>[] = [
@@ -501,9 +522,6 @@ const tier2Entities = Object.keys(tier2ByEntity);
     </Stack>
   );
 }
-
-
-
 
 
 

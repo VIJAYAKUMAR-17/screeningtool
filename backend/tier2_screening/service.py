@@ -4,10 +4,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from config import settings
+from database.db import SessionLocal
 from database.repository import SanctionRepository
 from engine import matcher as engine_matcher
 from engine.resolver import normalize_name
-from ingestion.ofac import fetch_live_entities
+from ingestion.ofac import OFACIngester, fetch_live_entities
 from services.csl_client import CSLClient, CSLClientError, CSLSearchFilters
 from tier2_screening.config import tier2_settings
 from tier2_screening.http_client import AsyncCachedHttpClient
@@ -71,6 +73,8 @@ class Tier2ScreeningService:
         self,
         tier1_run_id: int,
         target_entity: str,
+        country: str | None = None,
+        identifier: str | None = None,
         include_adverse_media: bool = True,
         use_csl: bool = True,
         csl_sources: list[str] | None = None,
@@ -101,7 +105,12 @@ class Tier2ScreeningService:
             ("opencorporates", opencorp_provider),
         ):
             try:
-                rel, statuses = await provider.discover(target_entity)
+                if provider_name == "sec":
+                    rel, statuses = await provider.discover(target_entity, identifier=identifier)
+                elif provider_name == "gleif":
+                    rel, statuses = await provider.discover(target_entity, country=country, identifier=identifier)
+                else:
+                    rel, statuses = await provider.discover(target_entity)
                 discovered.extend(rel)
                 source_statuses.extend(statuses)
                 data_sources.update(
@@ -168,6 +177,17 @@ class Tier2ScreeningService:
             coverage_status=coverage_status,
         )
         risk_level = "low" if risk_score <= 20 else "medium" if risk_score <= 50 else "high"
+        recommended_action, analyst_summary, next_steps = self._guidance(
+            target_entity=target_entity,
+            risk_level=risk_level,
+            risk_score=risk_score,
+            sanctions_matches=sanctions_matches,
+            adverse_media_count=len(adverse_media_findings),
+            coverage_status=coverage_status,
+            source_statuses=source_statuses,
+            country=country,
+            identifier=identifier,
+        )
 
         return Tier2ScreenResponse(
             run_id=0,
@@ -191,6 +211,9 @@ class Tier2ScreeningService:
             coverage_status=coverage_status,
             coverage_summary=coverage_summary,
             limitations=limitations,
+            recommended_action=recommended_action,
+            analyst_summary=analyst_summary,
+            next_steps=next_steps,
         )
 
     async def _rescreen_against_sanctions_sources(
@@ -211,51 +234,93 @@ class Tier2ScreeningService:
         source_statuses: list[SourceStatus] = []
         sanction_repo = SanctionRepository(self.db)
         entities = sanction_repo.get_all()
+        auto_ingest_error: Exception | None = None
+        auto_ingested_count: int | None = None
+
+        if not entities and settings.auto_sync_ofac_on_screening:
+            try:
+                auto_ingested_count = await asyncio.to_thread(self._auto_ingest_local_ofac)
+                if auto_ingested_count:
+                    entities = sanction_repo.get_all()
+            except Exception as exc:
+                auto_ingest_error = exc
+                self.log.warning("tier2_local_ofac_auto_ingest_failed", extra={"error": str(exc)})
+
         if entities:
             data_sources.add("Local sanctions DB")
+            if auto_ingested_count:
+                message = "Local sanctions records were empty, so Tier 2 auto-loaded OFAC records into the local fallback and used them."
+            else:
+                message = "Local sanctions records loaded and used for related-party re-screening."
             source_statuses.append(
                 SourceStatus(
                     source="Local sanctions DB",
                     status="checked",
                     records_found=len(entities),
-                    message="Local sanctions records loaded and used for related-party re-screening.",
+                    message=message,
                 )
             )
         else:
+            if auto_ingest_error:
+                message = (
+                    f"Local backup sanctions copy is empty and automatic OFAC ingest failed: {auto_ingest_error}. "
+                    "Live sources were used where available, but local fallback coverage is incomplete."
+                )
+            elif settings.auto_sync_ofac_on_screening:
+                message = (
+                    "Local backup sanctions copy is empty and automatic OFAC ingest did not load records. "
+                    "Live sources were used where available, but local fallback coverage is incomplete."
+                )
+            else:
+                message = (
+                    "Local backup sanctions copy is empty and automatic OFAC ingest is disabled. "
+                    "Live sources were used where available, but local fallback coverage is incomplete."
+                )
             source_statuses.append(
                 SourceStatus(
                     source="Local sanctions DB",
-                    status="unavailable",
-                    message="No local sanctions records are loaded; run ingesters or rely on live CSL coverage.",
+                    status="not_configured",
+                    message=message,
                 )
             )
 
-        try:
-            live_ofac_entities, from_cache = await _live_ofac_cache.get()
-            entities.extend(live_ofac_entities)
-            if live_ofac_entities:
-                data_sources.add("OFAC live file")
+        if auto_ingested_count and entities:
+            data_sources.add("OFAC live file")
             source_statuses.append(
                 SourceStatus(
                     source="OFAC live file",
                     status="checked",
-                    records_found=len(live_ofac_entities),
-                    message=(
-                        "Live OFAC records loaded from cache."
-                        if from_cache
-                        else "Live OFAC records downloaded and cached for related-party re-screening."
-                    ),
+                    records_found=auto_ingested_count,
+                    message="Live OFAC records were downloaded into the local fallback and reused for related-party re-screening.",
                 )
             )
-        except Exception as exc:
-            self.log.warning("tier2_live_ofac_fetch_failed", extra={"error": str(exc)})
-            source_statuses.append(
-                SourceStatus(
-                    source="OFAC live file",
-                    status="unavailable",
-                    message=f"Live OFAC records could not be loaded: {exc}",
+        else:
+            try:
+                live_ofac_entities, from_cache = await _live_ofac_cache.get()
+                entities.extend(live_ofac_entities)
+                if live_ofac_entities:
+                    data_sources.add("OFAC live file")
+                source_statuses.append(
+                    SourceStatus(
+                        source="OFAC live file",
+                        status="checked",
+                        records_found=len(live_ofac_entities),
+                        message=(
+                            "Live OFAC records loaded from cache."
+                            if from_cache
+                            else "Live OFAC records downloaded and cached for related-party re-screening."
+                        ),
+                    )
                 )
-            )
+            except Exception as exc:
+                self.log.warning("tier2_live_ofac_fetch_failed", extra={"error": str(exc)})
+                source_statuses.append(
+                    SourceStatus(
+                        source="OFAC live file",
+                        status="unavailable",
+                        message=f"Live OFAC records could not be loaded: {exc}",
+                    )
+                )
 
         relation_map = self._relation_map(names, discovered)
 
@@ -314,6 +379,13 @@ class Tier2ScreeningService:
             )
 
         return self._dedupe_sanctions_matches(matches), source_statuses
+
+    def _auto_ingest_local_ofac(self) -> int:
+        db = SessionLocal()
+        try:
+            return OFACIngester().ingest(db)
+        finally:
+            db.close()
 
     def _csl_screen(
         self,
@@ -521,22 +593,20 @@ class Tier2ScreeningService:
             if status.status == "partial" and self._is_critical_source(status.source)
         ]
         if coverage_status == "failed":
-            points += 40
             flags.append(
                 Tier2RiskFlag(
                     code="tier2_screening_incomplete",
                     description="Core Tier 2 sanctions re-screening could not be completed.",
-                    points=40,
+                    points=0,
                 )
             )
         elif failed_critical_sources or partial_critical_sources:
             failed_text = ", ".join(sorted(set(failed_critical_sources + partial_critical_sources)))
-            points += 25
             flags.append(
                 Tier2RiskFlag(
                     code="tier2_partial_coverage",
-                    description=f"Tier 2 coverage is incomplete for critical source(s): {failed_text}.",
-                    points=25,
+                    description=f"Coverage is incomplete for source(s): {failed_text}. This affects confidence, not entity risk.",
+                    points=0,
                 )
             )
         return flags, min(100, points)
@@ -549,7 +619,14 @@ class Tier2ScreeningService:
         }.get(provider_name, provider_name)
 
     def _dedupe_source_statuses(self, statuses: list[SourceStatus]) -> list[SourceStatus]:
-        status_rank = {"unavailable": 0, "partial": 1, "checked": 2, "skipped": 3}
+        status_rank = {
+            "unavailable": 0,
+            "partial": 1,
+            "not_configured": 2,
+            "checked": 3,
+            "not_applicable": 4,
+            "skipped": 5,
+        }
         deduped: dict[str, SourceStatus] = {}
         for status in statuses:
             key = status.source.strip().lower()
@@ -572,35 +649,43 @@ class Tier2ScreeningService:
         checked_sanctions = [
             status for status in statuses if status.source in sanctions_sources and status.status in {"checked", "partial"}
         ]
-        failed_sanctions = [
-            status for status in statuses if status.source in sanctions_sources and status.status == "unavailable"
+        blocking_sanctions_failures = [
+            status
+            for status in statuses
+            if status.source in {"OFAC live file", "CSL API", "Sanctions re-screening"}
+            and status.status in {"unavailable", "partial", "not_configured"}
         ]
-        critical_failures = [
-            status for status in statuses if status.status == "unavailable" and self._is_critical_source(status.source)
-        ]
-        partials = [
-            status for status in statuses if status.status == "partial" and self._is_critical_source(status.source)
+        confidence_gaps = [
+            status
+            for status in statuses
+            if status.status in {"unavailable", "partial", "not_configured"}
         ]
         skipped_critical = [
             status for status in statuses if status.status == "skipped" and self._is_critical_source(status.source)
         ]
 
         limitations: list[str] = []
-        for status in [*critical_failures, *partials, *skipped_critical]:
+        for status in [*confidence_gaps, *skipped_critical]:
             message = status.message or f"{status.source} was {status.status}."
             limitations.append(f"{status.source}: {message}")
 
-        if not checked_sanctions:
+        if (not checked_sanctions) or (
+            blocking_sanctions_failures
+            and not any(
+                status.source in {"OFAC live file", "CSL API"} and status.status == "checked"
+                for status in statuses
+            )
+        ):
             return (
                 "failed",
                 "Tier 2 could not complete sanctions re-screening because no sanctions source was available.",
                 limitations,
             )
 
-        if critical_failures or partials or failed_sanctions or skipped_critical:
+        if confidence_gaps or skipped_critical:
             return (
                 "partial",
-                "Tier 2 completed with source limitations. Treat low-evidence results as leads, not clearance.",
+                "Tier 2 checked live sanctions sources where available, but some supporting sources were incomplete. Treat this as partial confidence, not full clearance.",
                 limitations,
             )
 
@@ -614,11 +699,72 @@ class Tier2ScreeningService:
         return source in {
             "SEC EDGAR",
             "GLEIF",
-            "Local sanctions DB",
             "OFAC live file",
             "CSL API",
             "Sanctions re-screening",
         }
+
+    def _guidance(
+        self,
+        target_entity: str,
+        risk_level: str,
+        risk_score: int,
+        sanctions_matches: list[SanctionsMatch],
+        adverse_media_count: int,
+        coverage_status: CoverageStatus,
+        source_statuses: list[SourceStatus],
+        country: str | None,
+        identifier: str | None,
+    ) -> tuple[str, str, list[str]]:
+        actionable_matches = [
+            match for match in sanctions_matches if (match.status or "").lower() in {"flagged", "review_needed"}
+        ]
+        unavailable_sources = [
+            status.source for status in source_statuses if status.status in {"unavailable", "partial", "not_configured"}
+        ]
+
+        if risk_level == "high" or any(match.status == "flagged" for match in actionable_matches):
+            action = "Do not approve until a compliance reviewer resolves the sanctions hit."
+        elif risk_level == "medium" or actionable_matches or adverse_media_count:
+            action = "Review before approval."
+        elif coverage_status != "complete":
+            action = "Review before approval because screening confidence is partial."
+        else:
+            action = "No immediate Tier 2 concern found in the completed sources."
+
+        if actionable_matches:
+            summary = (
+                f"{target_entity} has reviewable Tier 2 match evidence. "
+                f"Risk score is {risk_score}, and source coverage is {coverage_status}."
+            )
+        elif coverage_status != "complete":
+            summary = (
+                f"No actionable Tier 2 sanctions hit was found for {target_entity} in the completed checks. "
+                f"However, coverage is {coverage_status} because {', '.join(unavailable_sources[:4]) or 'some sources'} did not fully complete."
+            )
+        else:
+            summary = (
+                f"No actionable Tier 2 sanctions, ownership, or adverse-media concern was found for {target_entity} "
+                "in the completed configured sources."
+            )
+
+        next_steps: list[str] = []
+        if not country:
+            next_steps.append("Add the supplier country or jurisdiction, then re-run Tier 2.")
+        if not identifier:
+            next_steps.append("Add a legal identifier such as LEI, company registration number, ticker, or CIK if available.")
+        if coverage_status != "complete":
+            next_steps.append("Retry missing sources or ask compliance to manually verify official sanctions sources before approval.")
+        if any(status.source == "OpenCorporates" and status.status == "not_configured" for status in source_statuses):
+            next_steps.append("Configure OPENCORPORATES_API_TOKEN if officer or company-registry enrichment is required.")
+        if any(status.source == "Local sanctions DB" and status.status == "not_configured" for status in source_statuses):
+            next_steps.append("Load or schedule local sanctions-list ingesters so the local fallback database is populated.")
+        if actionable_matches:
+            next_steps.append("Open the candidate match details and confirm whether it is a true match or false positive.")
+        if not next_steps:
+            next_steps.append("Keep this screening result with the supplier record for audit history.")
+
+        return action, summary, next_steps
 
 
 def serialize_tier2_response(result: Tier2ScreenResponse) -> dict[str, Any]:
@@ -668,5 +814,11 @@ def normalize_tier2_findings(
         data["coverage_status"] = "partial"
     if not isinstance(data.get("coverage_summary"), str):
         data["coverage_summary"] = None
+    if not isinstance(data.get("recommended_action"), str):
+        data["recommended_action"] = None
+    if not isinstance(data.get("analyst_summary"), str):
+        data["analyst_summary"] = data.get("coverage_summary")
+    if not isinstance(data.get("next_steps"), list):
+        data["next_steps"] = []
 
     return data

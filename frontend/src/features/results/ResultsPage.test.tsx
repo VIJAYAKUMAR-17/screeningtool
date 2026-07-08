@@ -34,6 +34,6 @@ describe("ResultsPage", () => {
     renderWithProviders(<ResultsPage />);
     expect(await screen.findByText(/screening history/i)).toBeInTheDocument();
     await waitFor(() => expect(api.getScreeningRuns).toHaveBeenCalled());
-    expect(screen.getByPlaceholderText(/search by customer name/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search customer, run, or status/i)).toBeInTheDocument();
   });
 });

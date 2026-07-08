@@ -63,19 +63,19 @@ Raises typed errors (auth, rate limit, timeout, upstream) that `screen.py` maps 
 
 ### `tier2_screening/` - deep screening
 
-- `service.py` - orchestrates a Tier 2 run: discovery via providers, then re-screens every discovered name against live OFAC CSVs and the CSL API, computes a risk score/level, persists a `Tier2ScreeningRun`.
-- `providers.py` - SEC EDGAR (company tickers, filings), GLEIF, OpenCorporates, adverse-media RSS scan, plus heuristics that infer related entities.
+- `service.py` - orchestrates a Tier 2 run: discovery via providers, then re-screens every discovered name against local sanctions data, live OFAC CSVs, and the CSL API; if the local sanctions table is empty and auto-sync is enabled, it auto-loads OFAC into the local fallback. It computes entity risk separately from coverage confidence, adds plain-English recommended action / summary / next steps, and persists a `Tier2ScreeningRun`.
+- `providers.py` - SEC EDGAR (company tickers, filings), GLEIF, OpenCorporates, SEC/FBI RSS adverse media, DOJ News API adverse media, plus conservative related-party extraction. SEC/GLEIF use optional identifier/country hints when available.
 - `http_client.py` / `cache.py` - shared async HTTP with retries and a simple cache.
 - `schemas.py`, `config.py`, `logging_utils.py` - request/response models, Tier 2 settings, logging.
-- Known weaknesses are tracked as C4/M11/M18 in `known-issues.md` (fabricated affiliate names, blocking downloads, silent provider failures).
+- Known weaknesses are tracked as C4/M11/M18 in `known-issues.md`; Tier 2 now distinguishes checked, unavailable, not configured, and not applicable source states instead of treating every gap as either clean or risky.
 
 ### `ingestion/` - loading lists into the database
 
 - `base.py` - common `Ingester` interface (`needs_update`, `ingest`) and sync-state tracking.
-- `ofac.py` - downloads and parses OFAC SDN/consolidated CSVs; also exposes `fetch_live_entities()` used by Tier 2.
+- `ofac.py` - downloads and parses OFAC SDN/consolidated CSVs; also exposes `fetch_live_entities()` used by Tier 2 and `OFACIngester` for the Tier 2 first-run local fallback load.
 - `un.py` - parses the UN consolidated XML from `data/UN/` (static file; see issue C5).
 - `australia.py`, `sec_edgar.py` - other sources.
-- Triggered manually via `cli.py`; there is no automatic scheduler yet.
+- Triggered manually via `cli.py`; Tier 2 can auto-load the OFAC local fallback when it is empty, but there is no recurring scheduler yet.
 
 ### `database/` - persistence
 
@@ -127,8 +127,9 @@ In production these arrive as environment variables injected by ECS from SSM.
 ### Tier 2 screening
 
 1. `ScreeningPage.runTier2ForEntity` POSTs `/tier2/screen` per row.
-2. `tier2_screening/service.py` discovers related entities (SEC/GLEIF/OpenCorporates/media), re-screens all names against OFAC CSVs + CSL, computes risk, persists a `Tier2ScreeningRun` linked to the Tier 1 run.
-3. The eye icon opens the findings dialog from the stored result.
+2. `tier2_screening/service.py` discovers related entities (SEC/GLEIF/OpenCorporates/media), re-screens all names against the local sanctions fallback, live OFAC CSVs, and CSL, computes entity risk and source-coverage confidence, then persists a `Tier2ScreeningRun` linked to the Tier 1 run.
+3. The response includes source statuses, coverage summary, limitations, recommended action, analyst summary, and next steps.
+4. The eye icon opens the findings dialog from the stored result; the UI shows guidance first and raw source evidence under expandable detail.
 
 ### Reports
 

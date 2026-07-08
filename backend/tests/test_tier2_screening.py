@@ -10,11 +10,15 @@ from tier2_screening.service import Tier2ScreeningService, normalize_tier2_findi
 
 
 class FakeHttp:
-    def __init__(self, text_by_url: dict[str, str]):
+    def __init__(self, text_by_url: dict[str, str] | None = None, json_by_url: dict[str, dict] | None = None):
         self.text_by_url = text_by_url
+        self.json_by_url = json_by_url or {}
 
     async def get_text(self, url: str, params=None, headers=None):
-        return self.text_by_url.get(url)
+        return (self.text_by_url or {}).get(url)
+
+    async def get_json(self, url: str, params=None, headers=None):
+        return self.json_by_url.get(url)
 
 
 class Tier2ProviderTests(unittest.IsolatedAsyncioTestCase):
@@ -77,9 +81,35 @@ class Tier2ProviderTests(unittest.IsolatedAsyncioTestCase):
         assert findings[0].keyword == "fraud"
         assert statuses[0].status == "checked"
 
+    async def test_adverse_media_parses_doj_json_source(self):
+        url = "https://example.test/press_releases.json"
+        provider = AdverseMediaProvider(
+            FakeHttp(
+                json_by_url={
+                    url: {
+                        "results": [
+                            {
+                                "title": "Example Corp charged in export controls case",
+                                "body": "<p>Authorities announced an enforcement action.</p>",
+                                "url": "/example-case",
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+        provider.SOURCES = [("Example DOJ", "json", url)]
+
+        findings, statuses = await provider.scan(["Example Corp"])
+
+        assert len(findings) == 1
+        assert findings[0].url == "https://www.justice.gov/example-case"
+        assert findings[0].keyword in {"export control", "export controls", "enforcement action"}
+        assert statuses[0].status == "checked"
+
 
 class Tier2RiskTests(unittest.TestCase):
-    def test_unavailable_critical_source_adds_partial_coverage_risk(self):
+    def test_unavailable_critical_source_adds_coverage_flag_without_risk_points(self):
         service = Tier2ScreeningService.__new__(Tier2ScreeningService)
         statuses = [
             SourceStatus(source="SEC EDGAR", status="unavailable", message="timeout"),
@@ -96,8 +126,9 @@ class Tier2RiskTests(unittest.TestCase):
             coverage_status="partial",
         )
 
-        assert score == 25
+        assert score == 0
         assert [flag.code for flag in flags] == ["tier2_partial_coverage"]
+        assert flags[0].points == 0
 
     def test_skipped_optional_source_does_not_add_partial_coverage_risk(self):
         service = Tier2ScreeningService.__new__(Tier2ScreeningService)
@@ -140,6 +171,7 @@ class Tier2RiskTests(unittest.TestCase):
         assert payload["source_statuses"] == []
         assert payload["limitations"] == []
         assert payload["coverage_status"] == "partial"
+        assert payload["next_steps"] == []
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Tier2Settings(BaseSettings):
+    tier2_user_agent: str = "tier2-screening/1.0 (compliance@example.com)"
     sec_user_agent: str = "tier2-screening/1.0 (compliance@example.com)"
     sec_max_requests_per_second: int = 10
     sec_timeout_seconds: float = 20.0

@@ -44,6 +44,8 @@ export interface ScreeningResult {
   matchType?: string | null;
   rawMatchData?: unknown;
   resultType?: "customer" | "vendor";
+  country?: string | null;
+  identifier?: string | null;
 }
 
 export interface ScreeningSources {
@@ -115,7 +117,13 @@ export interface Tier2RelatedParty {
   source_refs: Tier2SourceRef[];
 }
 
-export type Tier2SourceStatusValue = "checked" | "partial" | "unavailable" | "skipped";
+export type Tier2SourceStatusValue =
+  | "checked"
+  | "partial"
+  | "unavailable"
+  | "skipped"
+  | "not_configured"
+  | "not_applicable";
 export type Tier2CoverageStatus = "complete" | "partial" | "failed";
 
 export interface Tier2SourceStatus {
@@ -173,6 +181,9 @@ export interface Tier2ScreeningResult {
   coverage_status: Tier2CoverageStatus;
   coverage_summary?: string | null;
   limitations: string[];
+  recommended_action?: string | null;
+  analyst_summary?: string | null;
+  next_steps: string[];
 }
 
 export interface Tier2DashboardSummary {

@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-SourceStatusValue = Literal["checked", "partial", "unavailable", "skipped"]
+SourceStatusValue = Literal["checked", "partial", "unavailable", "skipped", "not_configured", "not_applicable"]
 CoverageStatus = Literal["complete", "partial", "failed"]
 
 RelationshipType = Literal[
@@ -22,6 +22,8 @@ RelationshipType = Literal[
 class Tier2ScreenRequest(BaseModel):
     run_id: int = Field(..., gt=0, description="Tier 1 screening run id")
     primary_entity: str | None = Field(default=None, description="Optional explicit entity to deep-screen")
+    country: str | None = None
+    identifier: str | None = Field(default=None, description="Optional LEI, ticker, CIK, or registration identifier")
     include_adverse_media: bool = True
     use_csl: bool = True
     sources: list[str] | None = None
@@ -103,6 +105,9 @@ class Tier2ScreenResponse(BaseModel):
     coverage_status: CoverageStatus = "partial"
     coverage_summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
+    recommended_action: str | None = None
+    analyst_summary: str | None = None
+    next_steps: list[str] = Field(default_factory=list)
 
 
 class Tier2SummaryResponse(BaseModel):
@@ -111,4 +116,3 @@ class Tier2SummaryResponse(BaseModel):
     medium_risk: int
     low_risk: int
     latest_runs: list[Tier2ScreenResponse]
-

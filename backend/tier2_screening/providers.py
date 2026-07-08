@@ -234,7 +234,7 @@ class SecProvider:
             await asyncio.sleep(1 / max(1, tier2_settings.sec_max_requests_per_second))
             return payload
 
-    async def discover(self, company_name: str) -> tuple[list[RelatedParty], list[SourceStatus]]:
+    async def discover(self, company_name: str, identifier: str | None = None) -> tuple[list[RelatedParty], list[SourceStatus]]:
         related: list[RelatedParty] = []
         tickers_url = "https://www.sec.gov/files/company_tickers.json"
         tickers = await self._throttled_get_json(tickers_url)
@@ -249,13 +249,13 @@ class SecProvider:
             ]
 
         rows = list(tickers.values())
-        best = _pick_best_company_match(company_name, rows, "title", min_score=72.0)
+        best = self._pick_company_match(company_name, rows, identifier)
         if not best:
             return [], [
                 _source_status(
                     self.source_name,
-                    "checked",
-                    message="No close SEC listed-company match found.",
+                    "not_applicable",
+                    message="No close SEC public-company match found; SEC filings may not apply to this private, foreign, or differently named entity.",
                     url=tickers_url,
                 )
             ]
@@ -408,6 +408,23 @@ class SecProvider:
                 return name
         return None
 
+    def _pick_company_match(
+        self,
+        company_name: str,
+        rows: list[dict[str, Any]],
+        identifier: str | None,
+    ) -> dict[str, Any] | None:
+        value = (identifier or "").strip()
+        if value:
+            normalized_identifier = re.sub(r"[^A-Za-z0-9]", "", value).lower()
+            for row in rows:
+                ticker = str(row.get("ticker", "")).lower()
+                cik = str(row.get("cik_str", "")).lstrip("0")
+                if normalized_identifier == ticker or normalized_identifier == cik:
+                    return row
+
+        return _pick_best_company_match(company_name, rows, "title", min_score=72.0)
+
 
 class GleifProvider:
     source_name = "GLEIF"
@@ -415,13 +432,26 @@ class GleifProvider:
     def __init__(self, http: AsyncCachedHttpClient):
         self.http = http
 
-    async def discover(self, company_name: str) -> tuple[list[RelatedParty], list[SourceStatus]]:
+    async def discover(
+        self,
+        company_name: str,
+        country: str | None = None,
+        identifier: str | None = None,
+    ) -> tuple[list[RelatedParty], list[SourceStatus]]:
         related: list[RelatedParty] = []
         search_url = f"{tier2_settings.gleif_base_url}/lei-records"
-        payload = await self.http.get_json(
-            search_url,
-            params={"filter[entity.legalName]": company_name, "page[size]": 5},
+        lei = self._normalize_lei(identifier)
+        params: dict[str, Any] = (
+            {"page[size]": 1}
+            if lei
+            else {"filter[entity.legalName]": company_name, "page[size]": 10}
         )
+        if lei:
+            search_url = f"{tier2_settings.gleif_base_url}/lei-records/{lei}"
+        elif country:
+            params["filter[entity.legalAddress.country]"] = country.upper()
+
+        payload = await self.http.get_json(search_url, params=params)
         if not isinstance(payload, dict):
             return [], [
                 _source_status(
@@ -432,22 +462,25 @@ class GleifProvider:
                 )
             ]
         data = payload.get("data", [])
-        if not isinstance(data, list) or not data:
+        rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+        if not rows:
             return [], [
                 _source_status(
                     self.source_name,
-                    "checked",
-                    message="No matching LEI record found.",
+                    "not_applicable",
+                    message="No matching LEI record found; LEI ownership data may not exist for this company.",
                     url=search_url,
                 )
             ]
 
         best = None
         best_score = 0.0
-        for row in data:
+        for row in rows:
             attrs = row.get("attributes", {}) if isinstance(row, dict) else {}
             legal_name = attrs.get("entity", {}).get("legalName", {}).get("name", "")
             score = fuzz.token_sort_ratio(normalize_name(company_name), normalize_name(str(legal_name)))
+            if lei:
+                score = max(score, 100.0)
             if score > best_score:
                 best = row
                 best_score = score
@@ -455,8 +488,8 @@ class GleifProvider:
             return [], [
                 _source_status(
                     self.source_name,
-                    "checked",
-                    message="GLEIF returned candidates, but none were close enough for ownership lookup.",
+                    "not_applicable",
+                    message="GLEIF returned candidates, but none were close enough. Add LEI, country, address, or exact legal name to improve ownership lookup.",
                     url=search_url,
                 )
             ]
@@ -514,6 +547,12 @@ class GleifProvider:
             )
         ]
 
+    def _normalize_lei(self, identifier: str | None) -> str | None:
+        value = re.sub(r"[^A-Za-z0-9]", "", identifier or "").upper()
+        if len(value) == 20 and value.isalnum():
+            return value
+        return None
+
     def _relationship_url(self, relationships: dict[str, Any], keys: tuple[str, ...]) -> str | None:
         if not isinstance(relationships, dict):
             return None
@@ -560,8 +599,8 @@ class OpenCorporatesProvider:
             return [], [
                 _source_status(
                     self.source_name,
-                    "skipped",
-                    message="OpenCorporates API token is not configured.",
+                    "not_configured",
+                    message="Company-registry enrichment is not configured; OpenCorporates officers and related parties were not checked.",
                 )
             ]
 
@@ -727,6 +766,30 @@ def _parse_feed_items(feed_text: str) -> list[dict[str, str]]:
     return items
 
 
+def _parse_doj_news_items(payload: dict[str, Any]) -> list[dict[str, str]]:
+    rows = payload.get("results", [])
+    if not isinstance(rows, list):
+        return []
+
+    items: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        title = _html_to_text(str(row.get("title") or "")).strip()
+        body = _html_to_text(str(row.get("body") or "")).strip()
+        url = str(row.get("url") or row.get("path") or "")
+        if url and url.startswith("/"):
+            url = f"https://www.justice.gov{url}"
+        items.append(
+            {
+                "title": title or "Untitled DOJ press release",
+                "description": body,
+                "link": url,
+            }
+        )
+    return items
+
+
 def _plain_key(value: str) -> str:
     value = html.unescape(value or "").lower()
     value = re.sub(r"[^a-z0-9]+", " ", value)
@@ -782,9 +845,9 @@ def _snippet(raw_text: str, entity_name: str, keyword: str, max_length: int = 22
 
 class AdverseMediaProvider:
     SOURCES = [
-        ("SEC enforcement releases", "https://www.sec.gov/news/pressreleases.rss"),
-        ("DOJ press releases", "https://www.justice.gov/news/press-releases?format=feed&type=rss"),
-        ("FBI news releases", "https://www.fbi.gov/news/press-releases/rss.xml"),
+        ("SEC enforcement releases", "rss", "https://www.sec.gov/news/pressreleases.rss"),
+        ("DOJ press releases", "json", "https://www.justice.gov/api/v1/press_releases.json?pagesize=50"),
+        ("FBI news releases", "rss", "https://www.fbi.gov/feeds/national-press-releases/rss.xml"),
     ]
     KEYWORDS = [
         "sanction",
@@ -810,26 +873,26 @@ class AdverseMediaProvider:
         statuses: list[SourceStatus] = []
         seen: set[tuple[str, str, str]] = set()
 
-        for source_name, url in self.SOURCES:
-            text = await self.http.get_text(url)
-            if not text:
+        for source in self.SOURCES:
+            source_name, source_type, url = self._source_parts(source)
+            items = await self._load_source_items(source_type, url)
+            if items is None:
                 statuses.append(
                     _source_status(
                         source_name,
                         "unavailable",
-                        message="Adverse-media feed could not be retrieved.",
+                        message="Adverse-media source could not be retrieved; sanctions-list screening still ran.",
                         url=url,
                     )
                 )
                 continue
 
-            items = _parse_feed_items(text)
             if not items:
                 statuses.append(
                     _source_status(
                         source_name,
                         "partial",
-                        message="Feed was retrieved but no RSS/Atom items could be parsed.",
+                        message="Adverse-media source was retrieved but no items could be parsed.",
                         url=url,
                     )
                 )
@@ -869,13 +932,31 @@ class AdverseMediaProvider:
                     source_name,
                     "checked",
                     records_found=source_findings,
-                    message=f"Parsed {len(items)} feed item(s) with entity-keyword proximity checks.",
+                    message=f"Parsed {len(items)} item(s) with entity-keyword proximity checks.",
                     url=url,
                 )
             )
             if len(findings) >= tier2_settings.tier2_adverse_media_max_findings:
                 break
         return findings, statuses
+
+    def _source_parts(self, source: tuple[str, ...]) -> tuple[str, str, str]:
+        if len(source) == 2:
+            return source[0], "rss", source[1]
+        return source[0], source[1], source[2]
+
+    async def _load_source_items(self, source_type: str, url: str) -> list[dict[str, str]] | None:
+        headers = {"User-Agent": tier2_settings.tier2_user_agent}
+        if source_type == "json":
+            payload = await self.http.get_json(url, headers=headers)
+            if not isinstance(payload, dict):
+                return None
+            return _parse_doj_news_items(payload)
+
+        text = await self.http.get_text(url, headers=headers)
+        if not text:
+            return None
+        return _parse_feed_items(text)
 
 
 def infer_offshore_chain(related: list[RelatedParty]) -> bool:

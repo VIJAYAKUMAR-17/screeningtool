@@ -39,7 +39,14 @@ function sourceStatusColor(status: Tier2SourceStatusValue): "success" | "warning
   if (status === "checked") return "success";
   if (status === "partial") return "warning";
   if (status === "unavailable") return "error";
+  if (status === "not_configured") return "warning";
   return "default";
+}
+
+function actionSeverity(result: Tier2ScreeningResult): "success" | "warning" | "error" | "info" {
+  if (result.risk_level === "high" || result.coverage_status === "failed") return "error";
+  if (result.risk_level === "medium" || result.coverage_status === "partial") return "warning";
+  return "success";
 }
 
 function RelatedTable({ items }: { items: Tier2RelatedParty[] }) {
@@ -88,7 +95,9 @@ export function Tier2StructuredDetails({
 }) {
   const sourceStatuses = result.source_statuses ?? [];
   const limitations = result.limitations ?? [];
+  const nextSteps = result.next_steps ?? [];
   const coverageStatus = result.coverage_status ?? "partial";
+  const guidanceSeverity = actionSeverity(result);
   const severity =
     result.risk_level === "high"
       ? "error"
@@ -110,6 +119,7 @@ export function Tier2StructuredDetails({
   const totalRelated = relatedGroups.reduce((sum, group) => sum + group.items.length, 0);
 
   const showSanctions = result.sanctions_matches.length > 0;
+  const actionableSanctions = result.sanctions_matches.filter((m) => ["flagged", "review_needed"].includes(m.status));
   const sanctionsShowScore = result.sanctions_matches.some((m) => m.score !== null && m.score !== undefined);
   const sanctionsShowMatched = result.sanctions_matches.some((m) => hasText(m.matched_name));
   const sanctionsShowList = result.sanctions_matches.some((m) => hasText(m.list_source));
@@ -120,6 +130,7 @@ export function Tier2StructuredDetails({
   const adverseShowSnippet = result.adverse_media_findings.some((f) => hasText(f.snippet));
 
   const showRiskFlags = result.risk_flags.length > 0;
+  const showRiskFlagPoints = result.risk_flags.some((flag) => flag.points > 0);
   const showDataSources = result.data_sources_used.length > 0;
   const showSourceStatuses = sourceStatuses.length > 0;
   const coverageSeverity = coverageStatus === "complete" ? "success" : coverageStatus === "failed" ? "error" : "warning";
@@ -138,6 +149,28 @@ export function Tier2StructuredDetails({
         <strong>{entityName || result.target_entity}</strong> | Risk Score: <strong>{result.risk_score}</strong> | Risk Level: <strong>{result.risk_level.toUpperCase()}</strong>
       </Alert>
 
+      {(result.recommended_action || result.analyst_summary || nextSteps.length > 0) && (
+        <Alert severity={guidanceSeverity}>
+          {result.recommended_action && (
+            <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: result.analyst_summary ? 0.4 : 0 }}>
+              {result.recommended_action}
+            </Typography>
+          )}
+          {result.analyst_summary && (
+            <Typography variant="body2">{result.analyst_summary}</Typography>
+          )}
+          {nextSteps.length > 0 && (
+            <Box component="ol" sx={{ pl: 2.2, mt: 0.8, mb: 0 }}>
+              {nextSteps.map((step, idx) => (
+                <Typography component="li" variant="body2" key={`${step}-${idx}`} sx={{ mb: 0.25 }}>
+                  {step}
+                </Typography>
+              ))}
+            </Box>
+          )}
+        </Alert>
+      )}
+
       <Alert severity={coverageSeverity}>
         <strong>Coverage: {coverageStatus.toUpperCase()}</strong>
         {result.coverage_summary ? ` | ${result.coverage_summary}` : ""}
@@ -147,7 +180,13 @@ export function Tier2StructuredDetails({
         <Chip label={`Target: ${result.target_entity}`} variant="outlined" />
         <Chip label={`Coverage: ${fmt(coverageStatus)}`} color={coverageSeverity} variant="outlined" />
         {totalRelated > 0 && <Chip label={`Related Parties: ${totalRelated}`} variant="outlined" />}
-        {showSanctions && <Chip label={`Sanctions Matches: ${result.sanctions_matches.length}`} color="error" variant="outlined" />}
+        {showSanctions && (
+          <Chip
+            label={`Candidate Matches: ${result.sanctions_matches.length}`}
+            color={actionableSanctions.length ? "error" : "default"}
+            variant="outlined"
+          />
+        )}
         {showAdverse && <Chip label={`Adverse Media: ${result.adverse_media_findings.length}`} color="warning" variant="outlined" />}
         {showRiskFlags && <Chip label={`Risk Flags: ${result.risk_flags.length}`} color={severity} variant="outlined" />}
       </Stack>
@@ -177,7 +216,7 @@ export function Tier2StructuredDetails({
       {showSanctions && (
         <Accordion>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle2">Sanctions Matches</Typography>
+            <Typography variant="subtitle2">Candidate Sanctions Matches</Typography>
           </AccordionSummary>
           <AccordionDetails>
             <TableContainer>
@@ -249,7 +288,7 @@ export function Tier2StructuredDetails({
       {(showRiskFlags || showDataSources || showSourceStatuses || limitations.length > 0) && (
         <Accordion>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle2">Risk Flags and Source Coverage</Typography>
+            <Typography variant="subtitle2">Review Flags and Source Coverage</Typography>
           </AccordionSummary>
           <AccordionDetails>
             {showRiskFlags && (
@@ -259,7 +298,7 @@ export function Tier2StructuredDetails({
                     <TableRow>
                       <TableCell>Code</TableCell>
                       <TableCell>Description</TableCell>
-                      <TableCell>Points</TableCell>
+                      {showRiskFlagPoints && <TableCell>Points</TableCell>}
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -267,7 +306,7 @@ export function Tier2StructuredDetails({
                       <TableRow key={`${flag.code}-${idx}`}>
                         <TableCell>{flag.code}</TableCell>
                         <TableCell>{flag.description}</TableCell>
-                        <TableCell>{flag.points}</TableCell>
+                        {showRiskFlagPoints && <TableCell>{flag.points}</TableCell>}
                       </TableRow>
                     ))}
                   </TableBody>

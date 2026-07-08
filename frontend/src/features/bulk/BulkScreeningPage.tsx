@@ -33,8 +33,6 @@ import {
   Cell,
   Pie,
   PieChart,
-  RadialBar,
-  RadialBarChart,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -204,13 +202,23 @@ export function BulkScreeningPage() {
     ]);
   };
 
-  const runTier2ForEntity = async (runId: number, entityName: string) => {
+  const runTier2ForEntity = async (
+    runId: number,
+    entityName: string,
+    context: { country?: string | null; identifier?: string | null } = {},
+  ) => {
     setTier2LoadingByEntity((prev) => ({ ...prev, [entityName]: true }));
     setTier2ErrorByEntity((prev) => ({ ...prev, [entityName]: "" }));
     try {
       const { data } = await http.post<Tier2ScreeningResult>(
         "/tier2/screen",
-        { run_id: runId, primary_entity: entityName, include_adverse_media: true },
+        {
+          run_id: runId,
+          primary_entity: entityName,
+          country: context.country || undefined,
+          identifier: context.identifier || undefined,
+          include_adverse_media: true,
+        },
         { timeout: 0 },
       );
       setTier2ByEntity((prev) => ({ ...prev, [entityName]: data }));
@@ -230,7 +238,10 @@ export function BulkScreeningPage() {
     const results = await Promise.all(
       outcomes.map((row) => {
         if (!row.tier1RunId || !row.queriedName?.trim()) return Promise.resolve(false);
-        return runTier2ForEntity(row.tier1RunId, row.queriedName.trim());
+        return runTier2ForEntity(row.tier1RunId, row.queriedName.trim(), {
+          country: row.country,
+          identifier: row.identifier,
+        });
       }),
     );
 
@@ -425,10 +436,6 @@ export function BulkScreeningPage() {
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
   }, [outcomeRows]);
-  const scoredRows = outcomeRows.filter((row) => typeof row.matchScore === "number");
-  const bulkAverageScore = scoredRows.length
-    ? Math.round(scoredRows.reduce((sum, row) => sum + (row.matchScore as number), 0) / scoredRows.length)
-    : 0;
   const bulkTier2Data = [
     {
       name: "Sanctions Matches",

@@ -39,13 +39,13 @@ This is the single largest coverage gap.
 
 ## 3. Known gaps in current list handling
 
-- The config flags `auto_sync_ofac_on_screening` and `ofac_sync_check_interval_seconds` are dead code; no automatic sync exists anywhere.
+- Tier 2 can auto-load OFAC into the local fallback when the sanctions table is empty, but no recurring freshness scheduler exists yet.
 - The UN list is read from `data/UN/consolidatedLegacyByNAME.xml`, a file committed to the repo; it only changes if a developer manually replaces it.
 - The file also uses the UN's deprecated legacy format.
 - There is no EU or BIS ingester for database mode; those lists are only reachable through the live CSL path.
 - Database ingest does a destructive delete-then-insert with no transaction; a failure mid-ingest leaves the list empty and produces false Clears.
-- Tier 2 screening re-downloads three OFAC CSV files from ofac.treasury.gov on every request, with no caching.
-- The UI does not tell the user which lists were actually checked in a given run.
+- Tier 2 live OFAC data is cached in-process; production still needs persisted list freshness metadata and scheduled refreshes.
+- The UI now tells the user which Tier 1/Tier 2 sources were checked, partial, unavailable, not configured, or not applicable.
 
 ## 4. Future: list coverage roadmap
 
@@ -98,5 +98,5 @@ These are tracked from the July 2026 end-to-end review and are prerequisites for
 - Rate limiting and input bounds on all endpoints.
 - Restrict CORS to the real frontend origin.
 - Escape user-supplied text in PDF generation and guard Excel cells against formula injection.
-- Surface per-source success or failure in Tier 2 results instead of silently reporting low risk when providers fail.
+- Keep expanding Tier 2 source reliability: per-source statuses now distinguish checked, partial, unavailable, not configured, and not applicable; remaining work is scheduled list ingest/freshness, paid or official registry fallbacks, and richer user-provided identifiers.
 - Route or remove the orphaned Audit Logs page; remove placeholder UI (notifications bell, hardcoded avatar, template legal text).

@@ -578,7 +578,7 @@ export function ScreeningRunsPanel({
               onClick={() => selectedRun && runTier2Mutation.mutate(selectedRun.runId)}
               disabled={!selectedRun || detailsLoading || !detailRows.length || runTier2Mutation.isPending}
             >
-              Run Tier 2 Screening
+              {tier2Query.data ? "Re-run Tier 2" : "Run Tier 2 Screening"}
             </Button>
             <Button size="small" startIcon={<DownloadOutlinedIcon />} onClick={() => selectedRun && void downloadReport(selectedRun.runId, "pdf")}>
               PDF
