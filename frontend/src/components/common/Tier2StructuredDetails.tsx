@@ -6,6 +6,7 @@
   Box,
   Chip,
   Divider,
+  Link,
   Stack,
   Table,
   TableBody,
@@ -16,7 +17,7 @@
   Typography,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { Tier2RelatedParty, Tier2ScreeningResult } from "@/types/api";
+import { Tier2RelatedParty, Tier2ScreeningResult, Tier2SourceStatusValue } from "@/types/api";
 
 type RelatedGroup = {
   key: string;
@@ -32,6 +33,13 @@ function fmt(value: string): string {
   return value
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function sourceStatusColor(status: Tier2SourceStatusValue): "success" | "warning" | "error" | "default" {
+  if (status === "checked") return "success";
+  if (status === "partial") return "warning";
+  if (status === "unavailable") return "error";
+  return "default";
 }
 
 function RelatedTable({ items }: { items: Tier2RelatedParty[] }) {
@@ -78,6 +86,9 @@ export function Tier2StructuredDetails({
   result: Tier2ScreeningResult;
   entityName?: string;
 }) {
+  const sourceStatuses = result.source_statuses ?? [];
+  const limitations = result.limitations ?? [];
+  const coverageStatus = result.coverage_status ?? "partial";
   const severity =
     result.risk_level === "high"
       ? "error"
@@ -106,16 +117,20 @@ export function Tier2StructuredDetails({
 
   const showAdverse = result.adverse_media_findings.length > 0;
   const adverseShowTitle = result.adverse_media_findings.some((f) => hasText(f.title));
+  const adverseShowSnippet = result.adverse_media_findings.some((f) => hasText(f.snippet));
 
   const showRiskFlags = result.risk_flags.length > 0;
   const showDataSources = result.data_sources_used.length > 0;
+  const showSourceStatuses = sourceStatuses.length > 0;
+  const coverageSeverity = coverageStatus === "complete" ? "success" : coverageStatus === "failed" ? "error" : "warning";
 
   const hasFindings =
     relatedGroups.length > 0 ||
     showSanctions ||
     showAdverse ||
     showRiskFlags ||
-    showDataSources;
+    showDataSources ||
+    showSourceStatuses;
 
   return (
     <Stack spacing={1.2}>
@@ -123,8 +138,14 @@ export function Tier2StructuredDetails({
         <strong>{entityName || result.target_entity}</strong> | Risk Score: <strong>{result.risk_score}</strong> | Risk Level: <strong>{result.risk_level.toUpperCase()}</strong>
       </Alert>
 
+      <Alert severity={coverageSeverity}>
+        <strong>Coverage: {coverageStatus.toUpperCase()}</strong>
+        {result.coverage_summary ? ` | ${result.coverage_summary}` : ""}
+      </Alert>
+
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
         <Chip label={`Target: ${result.target_entity}`} variant="outlined" />
+        <Chip label={`Coverage: ${fmt(coverageStatus)}`} color={coverageSeverity} variant="outlined" />
         {totalRelated > 0 && <Chip label={`Related Parties: ${totalRelated}`} variant="outlined" />}
         {showSanctions && <Chip label={`Sanctions Matches: ${result.sanctions_matches.length}`} color="error" variant="outlined" />}
         {showAdverse && <Chip label={`Adverse Media: ${result.adverse_media_findings.length}`} color="warning" variant="outlined" />}
@@ -205,6 +226,7 @@ export function Tier2StructuredDetails({
                     <TableCell>Keyword</TableCell>
                     <TableCell>Source</TableCell>
                     {adverseShowTitle && <TableCell>Title</TableCell>}
+                    {adverseShowSnippet && <TableCell>Snippet</TableCell>}
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -214,6 +236,7 @@ export function Tier2StructuredDetails({
                       <TableCell>{f.keyword}</TableCell>
                       <TableCell>{f.source}</TableCell>
                       {adverseShowTitle && <TableCell>{f.title || ""}</TableCell>}
+                      {adverseShowSnippet && <TableCell>{f.snippet || ""}</TableCell>}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -223,14 +246,14 @@ export function Tier2StructuredDetails({
         </Accordion>
       )}
 
-      {(showRiskFlags || showDataSources) && (
+      {(showRiskFlags || showDataSources || showSourceStatuses || limitations.length > 0) && (
         <Accordion>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle2">Risk Flags and Data Sources</Typography>
+            <Typography variant="subtitle2">Risk Flags and Source Coverage</Typography>
           </AccordionSummary>
           <AccordionDetails>
             {showRiskFlags && (
-              <TableContainer sx={{ mb: showDataSources ? 1.2 : 0 }}>
+              <TableContainer sx={{ mb: showDataSources || showSourceStatuses || limitations.length ? 1.2 : 0 }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
@@ -252,9 +275,62 @@ export function Tier2StructuredDetails({
               </TableContainer>
             )}
 
+            {showSourceStatuses && (
+              <TableContainer sx={{ mb: showDataSources || limitations.length ? 1.2 : 0 }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Source</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Records</TableCell>
+                      <TableCell>Message</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {sourceStatuses.map((status, idx) => (
+                      <TableRow key={`${status.source}-${idx}`}>
+                        <TableCell>
+                          {status.url ? (
+                            <Link href={status.url} target="_blank" rel="noreferrer">
+                              {status.source}
+                            </Link>
+                          ) : (
+                            status.source
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            size="small"
+                            label={fmt(status.status)}
+                            color={sourceStatusColor(status.status)}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>{status.records_found ?? 0}</TableCell>
+                        <TableCell>{status.message || ""}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+
+            {limitations.length > 0 && (
+              <Box sx={{ mb: showDataSources ? 1.2 : 0 }}>
+                <Typography variant="subtitle2" sx={{ mb: 0.4 }}>Limitations</Typography>
+                <Stack spacing={0.4}>
+                  {limitations.map((item, idx) => (
+                    <Typography key={`${item}-${idx}`} variant="body2" color="text.secondary">
+                      {item}
+                    </Typography>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+
             {showDataSources && (
               <>
-                {showRiskFlags && <Divider sx={{ my: 0.8 }} />}
+                {(showRiskFlags || showSourceStatuses || limitations.length > 0) && <Divider sx={{ my: 0.8 }} />}
                 <Typography variant="subtitle2" sx={{ mb: 0.4 }}>Data Sources Used</Typography>
                 <Typography variant="body2" color="text.secondary">
                   {result.data_sources_used.join(", ")}

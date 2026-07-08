@@ -1,4 +1,6 @@
-﻿from typing import Any
+import asyncio
+import time
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from engine import matcher as engine_matcher
 from engine.resolver import normalize_name
 from ingestion.ofac import fetch_live_entities
 from services.csl_client import CSLClient, CSLClientError, CSLSearchFilters
+from tier2_screening.config import tier2_settings
 from tier2_screening.http_client import AsyncCachedHttpClient
 from tier2_screening.logging_utils import get_tier2_logger
 from tier2_screening.providers import (
@@ -20,11 +23,38 @@ from tier2_screening.providers import (
     infer_sister_entities,
 )
 from tier2_screening.schemas import (
+    CoverageStatus,
     RelatedParty,
     SanctionsMatch,
+    SourceStatus,
     Tier2RiskFlag,
     Tier2ScreenResponse,
 )
+
+
+class _LiveOFACCache:
+    def __init__(self):
+        self._entities: list[Any] | None = None
+        self._expires_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def get(self) -> tuple[list[Any], bool]:
+        now = time.time()
+        if self._entities is not None and self._expires_at > now:
+            return list(self._entities), True
+
+        async with self._lock:
+            now = time.time()
+            if self._entities is not None and self._expires_at > now:
+                return list(self._entities), True
+
+            entities = await asyncio.to_thread(fetch_live_entities)
+            self._entities = list(entities)
+            self._expires_at = time.time() + tier2_settings.tier2_live_ofac_ttl_seconds
+            return list(self._entities), False
+
+
+_live_ofac_cache = _LiveOFACCache()
 
 
 class Tier2ScreeningService:
@@ -62,6 +92,7 @@ class Tier2ScreeningService:
         adverse_provider = AdverseMediaProvider(self.http)
 
         discovered: list[RelatedParty] = []
+        source_statuses: list[SourceStatus] = []
         data_sources = set()
 
         for provider_name, provider in (
@@ -70,20 +101,30 @@ class Tier2ScreeningService:
             ("opencorporates", opencorp_provider),
         ):
             try:
-                rel, sources = await provider.discover(target_entity)
+                rel, statuses = await provider.discover(target_entity)
                 discovered.extend(rel)
-                data_sources.update(sources)
+                source_statuses.extend(statuses)
+                data_sources.update(
+                    status.source for status in statuses if status.status in {"checked", "partial"}
+                )
             except Exception as exc:
                 self.log.warning(
                     "tier2_provider_failure",
                     extra={"provider": provider_name, "target_entity": target_entity, "error": str(exc)},
+                )
+                source_statuses.append(
+                    SourceStatus(
+                        source=self._provider_display_name(provider_name),
+                        status="unavailable",
+                        message=f"Provider failed: {exc}",
+                    )
                 )
 
         discovered.extend(infer_sister_entities(discovered, target_entity))
         discovered = dedupe_related(discovered)
 
         names_to_screen = [target_entity, *[item.name for item in discovered]]
-        sanctions_matches = self._rescreen_against_sanctions_sources(
+        sanctions_matches, sanctions_source_statuses = await self._rescreen_against_sanctions_sources(
             names=names_to_screen,
             discovered=discovered,
             use_csl=use_csl,
@@ -97,18 +138,34 @@ class Tier2ScreeningService:
             csl_result_size=csl_result_size,
             data_sources=data_sources,
         )
+        source_statuses.extend(sanctions_source_statuses)
 
         adverse_media_findings = []
         if include_adverse_media:
-            adverse_media_findings, adverse_sources = await adverse_provider.scan(names_to_screen)
-            data_sources.update(adverse_sources)
+            adverse_media_findings, adverse_source_statuses = await adverse_provider.scan(names_to_screen)
+            source_statuses.extend(adverse_source_statuses)
+            data_sources.update(
+                status.source for status in adverse_source_statuses if status.status in {"checked", "partial"}
+            )
+        else:
+            source_statuses.append(
+                SourceStatus(
+                    source="Adverse media",
+                    status="skipped",
+                    message="Adverse-media scan disabled for this request.",
+                )
+            )
 
         sections = extract_structured_sections(discovered)
+        source_statuses = self._dedupe_source_statuses(source_statuses)
+        coverage_status, coverage_summary, limitations = self._coverage(source_statuses)
         risk_flags, risk_score = self._compute_risk(
             sanctions_matches=sanctions_matches,
             adverse_media_count=len(adverse_media_findings),
             related_entities_count=len(discovered),
             offshore_chain=infer_offshore_chain(discovered),
+            source_statuses=source_statuses,
+            coverage_status=coverage_status,
         )
         risk_level = "low" if risk_score <= 20 else "medium" if risk_score <= 50 else "high"
 
@@ -130,9 +187,13 @@ class Tier2ScreeningService:
             adverse_media_findings=adverse_media_findings,
             risk_flags=risk_flags,
             data_sources_used=sorted(data_sources),
+            source_statuses=source_statuses,
+            coverage_status=coverage_status,
+            coverage_summary=coverage_summary,
+            limitations=limitations,
         )
 
-    def _rescreen_against_sanctions_sources(
+    async def _rescreen_against_sanctions_sources(
         self,
         names: list[str],
         discovered: list[RelatedParty],
@@ -146,42 +207,87 @@ class Tier2ScreeningService:
         csl_postal_code: str | None,
         csl_result_size: int,
         data_sources: set[str],
-    ) -> list[SanctionsMatch]:
+    ) -> tuple[list[SanctionsMatch], list[SourceStatus]]:
+        source_statuses: list[SourceStatus] = []
         sanction_repo = SanctionRepository(self.db)
         entities = sanction_repo.get_all()
         if entities:
             data_sources.add("Local sanctions DB")
+            source_statuses.append(
+                SourceStatus(
+                    source="Local sanctions DB",
+                    status="checked",
+                    records_found=len(entities),
+                    message="Local sanctions records loaded and used for related-party re-screening.",
+                )
+            )
+        else:
+            source_statuses.append(
+                SourceStatus(
+                    source="Local sanctions DB",
+                    status="unavailable",
+                    message="No local sanctions records are loaded; run ingesters or rely on live CSL coverage.",
+                )
+            )
 
         try:
-            live_ofac_entities = fetch_live_entities()
+            live_ofac_entities, from_cache = await _live_ofac_cache.get()
             entities.extend(live_ofac_entities)
             if live_ofac_entities:
                 data_sources.add("OFAC live file")
+            source_statuses.append(
+                SourceStatus(
+                    source="OFAC live file",
+                    status="checked",
+                    records_found=len(live_ofac_entities),
+                    message=(
+                        "Live OFAC records loaded from cache."
+                        if from_cache
+                        else "Live OFAC records downloaded and cached for related-party re-screening."
+                    ),
+                )
+            )
         except Exception as exc:
             self.log.warning("tier2_live_ofac_fetch_failed", extra={"error": str(exc)})
+            source_statuses.append(
+                SourceStatus(
+                    source="OFAC live file",
+                    status="unavailable",
+                    message=f"Live OFAC records could not be loaded: {exc}",
+                )
+            )
 
         relation_map = self._relation_map(names, discovered)
 
         matches: list[SanctionsMatch] = []
-        batch = engine_matcher.batch_screen(names, entities)
-        for name, row in batch.items():
-            relation = relation_map.get(normalize_name(name), "related_entity")
-            for match in row:
-                matches.append(
-                    SanctionsMatch(
-                        name=name,
-                        relationship=relation,
-                        status=match["status"].value if hasattr(match["status"], "value") else str(match["status"]),
-                        score=float(match.get("match_score")) if match.get("match_score") is not None else None,
-                        matched_name=match.get("matched_name"),
-                        list_source=match.get("list_source"),
-                        match_type=match.get("match_type"),
+        if entities:
+            batch = engine_matcher.batch_screen(names, entities)
+            for name, row in batch.items():
+                relation = relation_map.get(normalize_name(name), "related_entity")
+                for match in row:
+                    matches.append(
+                        SanctionsMatch(
+                            name=name,
+                            relationship=relation,
+                            status=match["status"].value if hasattr(match["status"], "value") else str(match["status"]),
+                            score=float(match.get("match_score")) if match.get("match_score") is not None else None,
+                            matched_name=match.get("matched_name"),
+                            list_source=match.get("list_source"),
+                            match_type=match.get("match_type"),
+                        )
                     )
+        else:
+            source_statuses.append(
+                SourceStatus(
+                    source="Sanctions re-screening",
+                    status="unavailable",
+                    message="No local or live sanctions records were available for related-party matching.",
                 )
+            )
 
         if use_csl:
-            data_sources.add("CSL API")
-            csl_matches = self._csl_screen(
+            csl_matches, csl_status = await asyncio.to_thread(
+                self._csl_screen,
                 names=names,
                 relation_map=relation_map,
                 sources=csl_sources,
@@ -193,10 +299,21 @@ class Tier2ScreeningService:
                 postal_code=csl_postal_code,
                 size=csl_result_size,
             )
+            source_statuses.append(csl_status)
+            if csl_status.status in {"checked", "partial"}:
+                data_sources.add("CSL API")
             if csl_matches:
                 matches.extend(csl_matches)
+        else:
+            source_statuses.append(
+                SourceStatus(
+                    source="CSL API",
+                    status="skipped",
+                    message="CSL screening disabled for this request.",
+                )
+            )
 
-        return self._dedupe_sanctions_matches(matches)
+        return self._dedupe_sanctions_matches(matches), source_statuses
 
     def _csl_screen(
         self,
@@ -210,7 +327,7 @@ class Tier2ScreeningService:
         state: str | None,
         postal_code: str | None,
         size: int,
-    ) -> list[SanctionsMatch]:
+    ) -> tuple[list[SanctionsMatch], SourceStatus]:
         filters = CSLSearchFilters(
             sources=self._normalize_values(sources, uppercase=True),
             types=self._normalize_values(types, uppercase=False),
@@ -244,8 +361,18 @@ class Tier2ScreeningService:
                     )
         except CSLClientError as exc:
             self.log.warning("tier2_csl_screen_failed", extra={"error": str(exc)})
+            return matches, SourceStatus(
+                source="CSL API",
+                status="unavailable",
+                message=f"CSL screening failed: {exc}",
+            )
 
-        return matches
+        return matches, SourceStatus(
+            source="CSL API",
+            status="checked",
+            records_found=len(matches),
+            message=f"Screened {len(names)} Tier 2 name(s) against the Consolidated Screening List API.",
+        )
 
     def _relation_map(self, names: list[str], discovered: list[RelatedParty]) -> dict[str, str]:
         relation_map: dict[str, str] = {}
@@ -309,6 +436,8 @@ class Tier2ScreeningService:
         adverse_media_count: int,
         related_entities_count: int,
         offshore_chain: bool,
+        source_statuses: list[SourceStatus],
+        coverage_status: CoverageStatus,
     ) -> tuple[list[Tier2RiskFlag], int]:
         points = 0
         flags: list[Tier2RiskFlag] = []
@@ -380,10 +509,164 @@ class Tier2ScreeningService:
                     points=10,
                 )
             )
+
+        failed_critical_sources = [
+            status.source
+            for status in source_statuses
+            if status.status == "unavailable" and self._is_critical_source(status.source)
+        ]
+        partial_critical_sources = [
+            status.source
+            for status in source_statuses
+            if status.status == "partial" and self._is_critical_source(status.source)
+        ]
+        if coverage_status == "failed":
+            points += 40
+            flags.append(
+                Tier2RiskFlag(
+                    code="tier2_screening_incomplete",
+                    description="Core Tier 2 sanctions re-screening could not be completed.",
+                    points=40,
+                )
+            )
+        elif failed_critical_sources or partial_critical_sources:
+            failed_text = ", ".join(sorted(set(failed_critical_sources + partial_critical_sources)))
+            points += 25
+            flags.append(
+                Tier2RiskFlag(
+                    code="tier2_partial_coverage",
+                    description=f"Tier 2 coverage is incomplete for critical source(s): {failed_text}.",
+                    points=25,
+                )
+            )
         return flags, min(100, points)
+
+    def _provider_display_name(self, provider_name: str) -> str:
+        return {
+            "sec": "SEC EDGAR",
+            "gleif": "GLEIF",
+            "opencorporates": "OpenCorporates",
+        }.get(provider_name, provider_name)
+
+    def _dedupe_source_statuses(self, statuses: list[SourceStatus]) -> list[SourceStatus]:
+        status_rank = {"unavailable": 0, "partial": 1, "checked": 2, "skipped": 3}
+        deduped: dict[str, SourceStatus] = {}
+        for status in statuses:
+            key = status.source.strip().lower()
+            existing = deduped.get(key)
+            if not existing:
+                deduped[key] = status
+                continue
+            if status_rank[status.status] < status_rank[existing.status]:
+                deduped[key] = status
+            elif status.status == existing.status:
+                existing.records_found += status.records_found
+                if not existing.message and status.message:
+                    existing.message = status.message
+                if not existing.url and status.url:
+                    existing.url = status.url
+        return sorted(deduped.values(), key=lambda item: item.source.lower())
+
+    def _coverage(self, statuses: list[SourceStatus]) -> tuple[CoverageStatus, str, list[str]]:
+        sanctions_sources = {"Local sanctions DB", "OFAC live file", "CSL API"}
+        checked_sanctions = [
+            status for status in statuses if status.source in sanctions_sources and status.status in {"checked", "partial"}
+        ]
+        failed_sanctions = [
+            status for status in statuses if status.source in sanctions_sources and status.status == "unavailable"
+        ]
+        critical_failures = [
+            status for status in statuses if status.status == "unavailable" and self._is_critical_source(status.source)
+        ]
+        partials = [
+            status for status in statuses if status.status == "partial" and self._is_critical_source(status.source)
+        ]
+        skipped_critical = [
+            status for status in statuses if status.status == "skipped" and self._is_critical_source(status.source)
+        ]
+
+        limitations: list[str] = []
+        for status in [*critical_failures, *partials, *skipped_critical]:
+            message = status.message or f"{status.source} was {status.status}."
+            limitations.append(f"{status.source}: {message}")
+
+        if not checked_sanctions:
+            return (
+                "failed",
+                "Tier 2 could not complete sanctions re-screening because no sanctions source was available.",
+                limitations,
+            )
+
+        if critical_failures or partials or failed_sanctions or skipped_critical:
+            return (
+                "partial",
+                "Tier 2 completed with source limitations. Treat low-evidence results as leads, not clearance.",
+                limitations,
+            )
+
+        return (
+            "complete",
+            "Tier 2 completed across the configured public registry, sanctions, and adverse-media sources.",
+            limitations,
+        )
+
+    def _is_critical_source(self, source: str) -> bool:
+        return source in {
+            "SEC EDGAR",
+            "GLEIF",
+            "Local sanctions DB",
+            "OFAC live file",
+            "CSL API",
+            "Sanctions re-screening",
+        }
 
 
 def serialize_tier2_response(result: Tier2ScreenResponse) -> dict[str, Any]:
     return result.model_dump(mode="json")
 
 
+def normalize_tier2_findings(
+    findings: dict[str, Any] | None,
+    run_id: int,
+    tier1_run_id: int | None = None,
+    target_entity: str | None = None,
+    risk_score: int | None = None,
+    risk_level: str | None = None,
+) -> dict[str, Any]:
+    data = dict(findings or {})
+    data["run_id"] = run_id
+    if not isinstance(data.get("tier1_run_id"), int):
+        data["tier1_run_id"] = tier1_run_id or 0
+    if not isinstance(data.get("target_entity"), str):
+        data["target_entity"] = target_entity or ""
+    if not isinstance(data.get("risk_score"), int):
+        data["risk_score"] = risk_score or 0
+    if data.get("risk_level") not in {"low", "medium", "high"}:
+        data["risk_level"] = risk_level if risk_level in {"low", "medium", "high"} else "low"
+
+    list_defaults: dict[str, list[Any]] = {
+        "parent_companies": [],
+        "ultimate_parent": [],
+        "subsidiaries": [],
+        "sister_entities": [],
+        "directors_and_officers": [],
+        "major_shareholders": [],
+        "beneficial_owners": [],
+        "related_entities": [],
+        "sanctions_matches": [],
+        "adverse_media_findings": [],
+        "risk_flags": [],
+        "data_sources_used": [],
+        "source_statuses": [],
+        "limitations": [],
+    }
+    for key, default in list_defaults.items():
+        if not isinstance(data.get(key), list):
+            data[key] = list(default)
+
+    if data.get("coverage_status") not in {"complete", "partial", "failed"}:
+        data["coverage_status"] = "partial"
+    if not isinstance(data.get("coverage_summary"), str):
+        data["coverage_summary"] = None
+
+    return data

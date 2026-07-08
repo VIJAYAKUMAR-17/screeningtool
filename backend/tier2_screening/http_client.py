@@ -10,12 +10,15 @@ from tier2_screening.config import tier2_settings
 from tier2_screening.logging_utils import get_tier2_logger
 
 
+_SHARED_CACHE = AsyncTTLCache(ttl_seconds=tier2_settings.tier2_cache_ttl_seconds)
+
+
 class AsyncCachedHttpClient:
-    def __init__(self):
+    def __init__(self, cache: AsyncTTLCache | None = None):
         self.timeout = tier2_settings.tier2_http_timeout_seconds
         self.max_retries = max(0, tier2_settings.tier2_http_max_retries)
         self.backoff_base = max(0.1, tier2_settings.tier2_http_backoff_base_seconds)
-        self.cache = AsyncTTLCache(ttl_seconds=tier2_settings.tier2_cache_ttl_seconds)
+        self.cache = cache or _SHARED_CACHE
         self.log = get_tier2_logger()
 
     def _cache_key(self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None) -> str:
@@ -95,4 +98,3 @@ class AsyncCachedHttpClient:
                 sleep_seconds = self.backoff_base * (2**attempt)
                 await asyncio.sleep(sleep_seconds)
         return None
-

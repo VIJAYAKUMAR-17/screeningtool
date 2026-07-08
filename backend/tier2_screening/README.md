@@ -6,9 +6,10 @@ This module implements Enhanced Due Diligence (EDD) as a standalone package unde
 
 - Ownership/related-party discovery via SEC EDGAR, GLEIF, and OpenCorporates.
 - Re-screening of discovered entities/individuals with the existing Tier 1 screening engine.
-- Adverse media scan using SEC/DOJ/FBI/World Bank public sources.
+- Adverse media scan using SEC/DOJ/FBI public feeds.
+- Per-source coverage status (`checked`, `partial`, `unavailable`, `skipped`) so outages are not reported as clean results.
 - Risk scoring and risk level classification.
-- Async `httpx` requests with retry and TTL response caching.
+- Async `httpx` requests with retry and shared TTL response caching.
 - Structured logging and environment-driven configuration.
 
 ## API
@@ -41,9 +42,14 @@ This module implements Enhanced Due Diligence (EDD) as a standalone package unde
 - `TIER2_HTTP_MAX_RETRIES`
 - `TIER2_HTTP_BACKOFF_BASE_SECONDS`
 - `TIER2_CACHE_TTL_SECONDS`
+- `TIER2_LIVE_OFAC_TTL_SECONDS`
+- `TIER2_SEC_MAX_SUBSIDIARIES`
+- `TIER2_ADVERSE_MEDIA_MAX_FINDINGS`
 
 ## Notes
 
 - SEC endpoints require a valid User-Agent.
+- SEC subsidiary discovery parses listed Exhibit 21 documents when available; it does not invent affiliates from words like "Group" or "Holdings".
 - OpenCorporates free tier can return limited fields/rate-limited responses.
+- Adverse media findings require the screened entity and risk keyword in the same feed item near each other; blob-wide substring hits are ignored.
 - Findings are persisted in `tier2_screening_runs` for dashboard and results-page reuse.

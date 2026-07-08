@@ -5,7 +5,11 @@ from database.db import get_db
 from database.models import RunStatus
 from database.repository import ScreeningRunRepository, Tier2RunRepository
 from tier2_screening.schemas import Tier2ScreenRequest, Tier2SummaryResponse
-from tier2_screening.service import Tier2ScreeningService, serialize_tier2_response
+from tier2_screening.service import (
+    Tier2ScreeningService,
+    normalize_tier2_findings,
+    serialize_tier2_response,
+)
 
 router = APIRouter()
 
@@ -67,9 +71,14 @@ def get_latest_tier2_for_tier1(tier1_run_id: int, db: Session = Depends(get_db))
     run = Tier2RunRepository(db).get_latest_for_tier1(tier1_run_id)
     if not run:
         raise HTTPException(status_code=404, detail='No Tier 2 run found for this Tier 1 run.')
-    findings = run.findings or {}
-    findings['run_id'] = run.id
-    return findings
+    return normalize_tier2_findings(
+        run.findings,
+        run.id,
+        tier1_run_id=run.tier1_run_id,
+        target_entity=run.target_entity,
+        risk_score=run.risk_score,
+        risk_level=run.risk_level,
+    )
 
 
 @router.get('/dashboard', response_model=Tier2SummaryResponse)
@@ -79,14 +88,20 @@ def tier2_dashboard(limit: int = 10, db: Session = Depends(get_db)):
     high = medium = low = 0
 
     for row in rows:
-        findings = row.findings or {}
+        findings = normalize_tier2_findings(
+            row.findings,
+            row.id,
+            tier1_run_id=row.tier1_run_id,
+            target_entity=row.target_entity,
+            risk_score=row.risk_score,
+            risk_level=row.risk_level,
+        )
         if row.risk_level == 'high':
             high += 1
         elif row.risk_level == 'medium':
             medium += 1
         else:
             low += 1
-        findings['run_id'] = row.id
         latest_runs.append(findings)
 
     return {
@@ -96,4 +111,3 @@ def tier2_dashboard(limit: int = 10, db: Session = Depends(get_db)):
         'low_risk': low,
         'latest_runs': latest_runs,
     }
-

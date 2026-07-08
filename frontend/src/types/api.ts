@@ -115,6 +115,17 @@ export interface Tier2RelatedParty {
   source_refs: Tier2SourceRef[];
 }
 
+export type Tier2SourceStatusValue = "checked" | "partial" | "unavailable" | "skipped";
+export type Tier2CoverageStatus = "complete" | "partial" | "failed";
+
+export interface Tier2SourceStatus {
+  source: string;
+  status: Tier2SourceStatusValue;
+  records_found: number;
+  message?: string | null;
+  url?: string | null;
+}
+
 export interface Tier2SanctionsMatch {
   name: string;
   relationship: string;
@@ -131,6 +142,7 @@ export interface Tier2AdverseMediaFinding {
   source: string;
   title: string;
   url?: string | null;
+  snippet?: string | null;
 }
 
 export interface Tier2RiskFlag {
@@ -157,6 +169,10 @@ export interface Tier2ScreeningResult {
   adverse_media_findings: Tier2AdverseMediaFinding[];
   risk_flags: Tier2RiskFlag[];
   data_sources_used: string[];
+  source_statuses: Tier2SourceStatus[];
+  coverage_status: Tier2CoverageStatus;
+  coverage_summary?: string | null;
+  limitations: string[];
 }
 
 export interface Tier2DashboardSummary {

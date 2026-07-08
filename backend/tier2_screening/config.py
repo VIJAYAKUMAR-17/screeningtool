@@ -14,6 +14,9 @@ class Tier2Settings(BaseSettings):
     tier2_http_max_retries: int = 3
     tier2_http_backoff_base_seconds: float = 0.6
     tier2_cache_ttl_seconds: int = 3600
+    tier2_live_ofac_ttl_seconds: int = 21600
+    tier2_sec_max_subsidiaries: int = 50
+    tier2_adverse_media_max_findings: int = 25
 
     class Config:
         env_file = ".env"
@@ -21,4 +24,3 @@ class Tier2Settings(BaseSettings):
 
 
 tier2_settings = Tier2Settings()
-

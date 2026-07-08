@@ -3,6 +3,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+SourceStatusValue = Literal["checked", "partial", "unavailable", "skipped"]
+CoverageStatus = Literal["complete", "partial", "failed"]
+
 RelationshipType = Literal[
     "parent_company",
     "ultimate_parent",
@@ -37,6 +40,14 @@ class SourceRef(BaseModel):
     note: str | None = None
 
 
+class SourceStatus(BaseModel):
+    source: str
+    status: SourceStatusValue
+    records_found: int = 0
+    message: str | None = None
+    url: str | None = None
+
+
 class RelatedParty(BaseModel):
     name: str
     relationship: RelationshipType
@@ -61,6 +72,7 @@ class AdverseMediaFinding(BaseModel):
     source: str
     title: str
     url: str | None = None
+    snippet: str | None = None
 
 
 class Tier2RiskFlag(BaseModel):
@@ -87,6 +99,10 @@ class Tier2ScreenResponse(BaseModel):
     adverse_media_findings: list[AdverseMediaFinding] = Field(default_factory=list)
     risk_flags: list[Tier2RiskFlag] = Field(default_factory=list)
     data_sources_used: list[str] = Field(default_factory=list)
+    source_statuses: list[SourceStatus] = Field(default_factory=list)
+    coverage_status: CoverageStatus = "partial"
+    coverage_summary: str | None = None
+    limitations: list[str] = Field(default_factory=list)
 
 
 class Tier2SummaryResponse(BaseModel):
@@ -95,5 +111,4 @@ class Tier2SummaryResponse(BaseModel):
     medium_risk: int
     low_risk: int
     latest_runs: list[Tier2ScreenResponse]
-
 
