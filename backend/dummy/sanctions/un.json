@@ -1,0 +1,35 @@
+[
+  {
+    "name": "G.B.B. Industrial Group",
+    "aliases": ["GBB Industries", "G B B Industries Ltd", "GBB Industrial", "G.B.B Industries"],
+    "country": "IN",
+    "list_source": "UN",
+    "list_id": "UN-1267-QDe.156",
+    "entity_type": "company",
+    "address": "Plot 44, MIDC Industrial Area, Pune, Maharashtra, India",
+    "programs": ["1267/1989/2253 ISIL"],
+    "remarks": "Listed for financing prohibited procurement activities."
+  },
+  {
+    "name": "Crescent Star Trading Co",
+    "aliases": ["Crescent Trading", "CST Co."],
+    "country": "PK",
+    "list_source": "UN",
+    "list_id": "UN-1267-QDe.201",
+    "entity_type": "company",
+    "address": "Karachi Export Zone, Pakistan",
+    "programs": ["Taliban"],
+    "remarks": "Designated for providing financial support to Taliban."
+  },
+  {
+    "name": "Volga Petroleum Export JSC",
+    "aliases": ["VPE JSC", "Volga Petroleum"],
+    "country": "RU",
+    "list_source": "UN",
+    "list_id": "UN-1718-0077",
+    "entity_type": "company",
+    "address": "Samara, Russia",
+    "programs": ["DPRK"],
+    "remarks": "Involved in prohibited oil transfers to DPRK."
+  }
+]

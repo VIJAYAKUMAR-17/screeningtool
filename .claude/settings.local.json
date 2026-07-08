@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-ChildItem \"D:\\\\lm\\\\screen_tool\" -Recurse | Where-Object { -not $_.PSIsContainer } | Select-Object FullName)",
+      "Bash(python -c \"from ingestion.un import UNIngester, _XML_PATH; print\\('Import OK'\\); print\\('XML path:', _XML_PATH\\); print\\('Exists:', _XML_PATH.exists\\(\\)\\)\")",
+      "Bash(./venv/Scripts/python.exe -c \"from ingestion.un import UNIngester, _XML_PATH; print\\('Import OK'\\); print\\('XML path:', _XML_PATH\\); print\\('Exists:', _XML_PATH.exists\\(\\)\\)\")",
+      "Bash(./venv/Scripts/python.exe *)"
+    ]
+  }
+}

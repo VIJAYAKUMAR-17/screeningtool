@@ -1,0 +1,17 @@
+{
+  "_comment": "Sample POST bodies for POST /screen/vendors/link — registers Tier 2 relationships",
+  "links": [
+    {
+      "parent_vendor_name": "ITGlobe Incorporated",
+      "child_vendor_name": "Shenzhen Micro Precision Ltd",
+      "customer_name": "Makglobal FZCO",
+      "_note": "ITGlobe sources components from Shenzhen Micro Precision (BIS military end-user) — Tier 2 exposure"
+    },
+    {
+      "parent_vendor_name": "AXLETECH INDIA PVT. LTD.",
+      "child_vendor_name": "Nord Stream Services AG",
+      "customer_name": "Makglobal FZCO",
+      "_note": "AxleTech sources logistics from Nord Stream Services (EU sanctioned) — Tier 2 exposure"
+    }
+  ]
+}

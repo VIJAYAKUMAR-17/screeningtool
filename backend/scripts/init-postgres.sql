@@ -1,0 +1,3 @@
+-- The "sanctions" database is created automatically by the POSTGRES_DB
+-- environment variable in docker-compose.yml.
+-- This file is intentionally left as a no-op placeholder.

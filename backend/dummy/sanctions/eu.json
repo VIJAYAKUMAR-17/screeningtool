@@ -1,0 +1,24 @@
+[
+  {
+    "name": "Axle Technologies GmbH",
+    "aliases": ["AxleTech GmbH", "Axle Tech International", "Axle Technologies Europe"],
+    "country": "DE",
+    "list_source": "EU",
+    "list_id": "EU-2024-1865-0034",
+    "entity_type": "company",
+    "address": "Industriestrasse 88, Munich, Germany",
+    "programs": ["RUSSIA-2022"],
+    "remarks": "Sanctioned for supply of dual-use goods to restricted end-users."
+  },
+  {
+    "name": "Nord Stream Services AG",
+    "aliases": ["NSS AG", "Nord Stream Services"],
+    "country": "CH",
+    "list_source": "EU",
+    "list_id": "EU-2022-0328-0012",
+    "entity_type": "company",
+    "address": "Bahnhofstrasse 10, Zug, Switzerland",
+    "programs": ["RUSSIA-2022"],
+    "remarks": "Sanctioned entity under EU Russia sanctions package."
+  }
+]

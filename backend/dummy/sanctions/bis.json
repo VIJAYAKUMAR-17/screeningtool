@@ -1,0 +1,24 @@
+[
+  {
+    "name": "Technocraft Systems Private Limited",
+    "aliases": ["Technocraft Systems", "Technocraft Pvt Ltd", "Technocraft India Pvt"],
+    "country": "IN",
+    "list_source": "BIS",
+    "list_id": "BIS-EL-2023-IN-0087",
+    "entity_type": "company",
+    "address": "SEEPZ Special Economic Zone, Mumbai, India",
+    "programs": ["EAR-Entity-List"],
+    "remarks": "Listed for unauthorized re-export of controlled items."
+  },
+  {
+    "name": "Shenzhen Micro Precision Ltd",
+    "aliases": ["SMP Limited", "Shenzhen MP Ltd"],
+    "country": "CN",
+    "list_source": "BIS",
+    "list_id": "BIS-EL-2024-CN-0312",
+    "entity_type": "company",
+    "address": "Longhua District, Shenzhen, Guangdong, China",
+    "programs": ["EAR-Entity-List", "MILITARY-END-USER"],
+    "remarks": "Designated as military end-user under EAR."
+  }
+]

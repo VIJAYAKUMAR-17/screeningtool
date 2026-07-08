@@ -1,0 +1,11 @@
+{
+  "_comment": "Second customer request — Technocraft India with AI analysis enabled",
+  "customer_name": "Technocraft India",
+  "vendors": [
+    "ITGlobe Incorporated",
+    "G. B. B. INDUSTRIES",
+    "AXLETECH INDIA PVT. LTD."
+  ],
+  "lists": ["OFAC", "UN", "BIS", "EU"],
+  "use_ai": true
+}

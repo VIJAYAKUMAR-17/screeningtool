@@ -1,0 +1,46 @@
+[
+  {
+    "name": "IT Globe Incorporated",
+    "aliases": ["IT Globe Inc", "ITGlobe Corp", "I.T. Globe Inc."],
+    "country": "US",
+    "list_source": "OFAC",
+    "list_id": "OFAC-SDN-19823",
+    "entity_type": "company",
+    "address": "2100 Technology Drive, Reston, VA 20191, USA",
+    "programs": ["IRAN", "CYBER"],
+    "remarks": "Designated for illicit procurement of dual-use technology."
+  },
+  {
+    "name": "Makglobal International Trading FZCO",
+    "aliases": ["Mak Global FZCO", "Makglobal FZCO", "MAK Global FZC"],
+    "country": "AE",
+    "list_source": "OFAC",
+    "list_id": "OFAC-SDN-34421",
+    "entity_type": "company",
+    "address": "Jebel Ali Free Zone, Dubai, UAE",
+    "programs": ["SDGT"],
+    "remarks": "Front company linked to sanctioned arms network."
+  },
+  {
+    "name": "Black Sea Logistics LLC",
+    "aliases": ["BSL Logistics", "Black Sea LLC"],
+    "country": "RU",
+    "list_source": "OFAC",
+    "list_id": "OFAC-SDN-77104",
+    "entity_type": "company",
+    "address": "12 Morskaya St, Novorossiysk, Russia",
+    "programs": ["UKRAINE-EO13685"],
+    "remarks": "Sanctioned under Ukraine-related executive orders."
+  },
+  {
+    "name": "Meridian Capital Partners",
+    "aliases": ["Meridian Capital"],
+    "country": "GB",
+    "list_source": "OFAC",
+    "list_id": "OFAC-SDN-55901",
+    "entity_type": "company",
+    "address": "30 St Mary Axe, London, UK",
+    "programs": ["IRAN"],
+    "remarks": "Designated for facilitating Iran-linked financial transactions."
+  }
+]

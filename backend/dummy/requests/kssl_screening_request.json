@@ -1,0 +1,11 @@
+{
+  "_comment": "Sample POST body for POST /screen — the exact companies from the KSSL engagement",
+  "customer_name": "Makglobal FZCO",
+  "vendors": [
+    "ITGlobe Incorporated",
+    "G. B. B. INDUSTRIES",
+    "AXLETECH INDIA PVT. LTD."
+  ],
+  "lists": ["OFAC", "UN", "BIS", "EU"],
+  "use_ai": false
+}

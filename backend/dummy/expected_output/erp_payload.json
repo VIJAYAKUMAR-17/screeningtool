@@ -1,0 +1,56 @@
+{
+  "_comment": "Expected response from GET /report/1/erp — the ERP-formatted payload for vendor portal integration",
+  "schema_version": "1.0",
+  "report_id": "SCR-000001",
+  "generated_at": "2026-06-20T10:30:00+00:00",
+  "screening_duration_s": 0.042,
+  "customer_name": "Makglobal FZCO",
+  "overall_risk_level": "HIGH",
+  "overall_action": "BLOCK",
+  "requires_human_review": true,
+  "vendors_screened": 3,
+  "summary": {
+    "flagged": 2,
+    "review": 1,
+    "clear": 0
+  },
+  "vendor_results": [
+    {
+      "vendor_name": "ITGlobe Incorporated",
+      "screening_status": "Sanctions Match",
+      "status_code": "VRS-02",
+      "recommended_action": "BLOCK",
+      "sanctions_list": "OFAC",
+      "matched_entity": "IT Globe Inc",
+      "match_score": 91.0,
+      "match_type": "alias",
+      "supplier_tier": 1,
+      "ai_reasoning": null
+    },
+    {
+      "vendor_name": "G. B. B. INDUSTRIES",
+      "screening_status": "Sanctions Match",
+      "status_code": "VRS-02",
+      "recommended_action": "BLOCK",
+      "sanctions_list": "UN",
+      "matched_entity": "GBB Industries",
+      "match_score": 88.0,
+      "match_type": "alias",
+      "supplier_tier": 1,
+      "ai_reasoning": null
+    },
+    {
+      "vendor_name": "AXLETECH INDIA PVT. LTD.",
+      "screening_status": "Review Required",
+      "status_code": "VRS-01",
+      "recommended_action": "HOLD",
+      "sanctions_list": "EU",
+      "matched_entity": "Axle Tech International",
+      "match_score": 76.0,
+      "match_type": "alias",
+      "supplier_tier": 1,
+      "ai_reasoning": null
+    }
+  ],
+  "ai_narrative": null
+}

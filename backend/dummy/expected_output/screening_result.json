@@ -1,0 +1,46 @@
+{
+  "_comment": "Expected response from POST /screen for the KSSL request. Use this to validate your results.",
+  "run_id": 1,
+  "customer_name": "Makglobal FZCO",
+  "elapsed_seconds": 0.042,
+  "total_vendors": 3,
+  "flagged": 2,
+  "review_needed": 1,
+  "clear": 0,
+  "results": [
+    {
+      "vendor_name": "ITGlobe Incorporated",
+      "status": "flagged",
+      "match_score": 91.0,
+      "matched_name": "IT Globe Inc",
+      "list_source": "OFAC",
+      "match_type": "alias",
+      "all_matches": [
+        { "entity_name": "IT Globe Incorporated", "score": 91.0, "list": "OFAC", "status": "flagged" }
+      ]
+    },
+    {
+      "vendor_name": "G. B. B. INDUSTRIES",
+      "status": "flagged",
+      "match_score": 88.0,
+      "matched_name": "GBB Industries",
+      "list_source": "UN",
+      "match_type": "alias",
+      "all_matches": [
+        { "entity_name": "G.B.B. Industrial Group", "score": 88.0, "list": "UN", "status": "flagged" }
+      ]
+    },
+    {
+      "vendor_name": "AXLETECH INDIA PVT. LTD.",
+      "status": "review_needed",
+      "match_score": 76.0,
+      "matched_name": "Axle Tech International",
+      "list_source": "EU",
+      "match_type": "alias",
+      "all_matches": [
+        { "entity_name": "Axle Technologies GmbH", "score": 76.0, "list": "EU", "status": "review_needed" }
+      ]
+    }
+  ],
+  "ai_summary": null
+}
