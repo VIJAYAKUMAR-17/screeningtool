@@ -14,6 +14,8 @@ from database.models import MatchStatus, RunStatus
 from database.repository import SanctionRepository, ScreeningRunRepository, VendorRepository
 from engine import matcher as engine_matcher
 from engine.graph import SupplierGraph
+from config import settings
+from engine.resolver import normalize_name
 from services.csl_client import (
     CSLAuthError,
     CSLClient,
@@ -30,8 +32,8 @@ log = logging.getLogger(__name__)
 
 
 class ScreenRequest(BaseModel):
-    customer_name: str
-    vendors: list[str]
+    customer_name: str = Field(min_length=1, max_length=200)
+    vendors: list[str] = Field(min_length=1, max_length=500)
     lists: Optional[list[str]] = None
     use_ai: bool = False
     # Kept for backward compatibility with existing frontend payloads.
@@ -87,9 +89,9 @@ def _resolve_csl_sources(req: ScreenRequest, requested_lists: Optional[list[str]
 
 
 def _status_from_score(score: float) -> MatchStatus:
-    if score >= 85:
+    if score >= settings.match_threshold:
         return MatchStatus.FLAGGED
-    if score >= 70:
+    if score >= settings.fuzzy_review_threshold:
         return MatchStatus.REVIEW
     return MatchStatus.CLEAR
 
@@ -108,7 +110,24 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
     sanction_repo = SanctionRepository(db)
     run_repo = ScreeningRunRepository(db)
 
-    run = run_repo.create(customer_name=req.customer_name, vendor_names=req.vendors)
+    # The customer name is metadata identifying who the run is for; it is
+    # NOT screened. Only the submitted vendors/companies are screened.
+    names_to_screen: list[str] = []
+    for vendor in req.vendors:
+        name = vendor.strip()
+        if not name or name in names_to_screen:
+            continue
+        if len(normalize_name(name)) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Company name '{vendor}' is too short to screen reliably. Enter at least 3 characters.",
+            )
+        names_to_screen.append(name)
+
+    if not names_to_screen:
+        raise HTTPException(status_code=422, detail="No valid company names to screen.")
+
+    run = run_repo.create(customer_name=req.customer_name, vendor_names=names_to_screen)
     run_repo.update_status(run.id, RunStatus.RUNNING)
     start = time.perf_counter()
 
@@ -118,9 +137,6 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
         all_vendors = vendor_repo.get_all()
         graph = SupplierGraph()
         graph.load(all_vendors)
-
-        vendor_name_set = set(req.vendors)
-        names_to_screen = [req.customer_name] + [v for v in req.vendors if v != req.customer_name]
 
         batch: dict[str, list[dict]] = {}
 
@@ -188,10 +204,8 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
         results_out = []
         for name, matches in batch.items():
             top = matches[0] if matches else None
-            is_customer = (name == req.customer_name) and (name not in vendor_name_set)
 
-            if not is_customer:
-                vendor_repo.get_or_create(name, customer_name=req.customer_name)
+            vendor_repo.get_or_create(name, customer_name=req.customer_name)
 
             no_match = not bool(matches)
             result_data = {
@@ -201,7 +215,7 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
                 "matched_name": top["matched_name"] if top else None,
                 "list_source": top["list_source"] if top else None,
                 "match_type": top["match_type"] if top else None,
-                "tier": 0 if is_customer else 1,
+                "tier": 1,
                 "ai_reasoning": (top.get("remarks") if top else "No Match"),
             }
             run_repo.add_result(run.id, result_data)
@@ -210,7 +224,7 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
                 {
                     **result_data,
                     "status": result_data["status"].value if hasattr(result_data["status"], "value") else result_data["status"],
-                    "result_type": "customer" if is_customer else "vendor",
+                    "result_type": "vendor",
                     "no_match": no_match,
                     "remarks": "No Match" if no_match else top.get("remarks"),
                     "all_matches": [
@@ -234,8 +248,6 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
                 }
             )
 
-        results_out.sort(key=lambda r: (0 if r["result_type"] == "customer" else 1))
-
         elapsed = time.perf_counter() - start
         ai_summary = None
 
@@ -254,7 +266,7 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
             "run_id": run.id,
             "customer_name": req.customer_name,
             "elapsed_seconds": round(elapsed, 3),
-            "total_vendors": len(req.vendors),
+            "total_vendors": len(names_to_screen),
             "flagged": sum(1 for r in results_out if r["status"] == "flagged"),
             "review_needed": sum(1 for r in results_out if r["status"] == "review_needed"),
             "clear": sum(1 for r in results_out if r["status"] == "clear"),

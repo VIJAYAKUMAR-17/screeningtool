@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build outputs (CI rebuilds these)
+frontend/dist/
+backend/api/static/*
+!backend/api/static/.gitkeep
+
+# Environment / secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+
+# Local databases and logs
+*.db
+*.log
+
+# Editor/OS
+.DS_Store
+.claude/settings.local.json
+
+# QA / tooling artifacts
+.playwright-mcp/
+qa-downloads/
+qa-fixtures/
+qa-screenshots/
+demo_bundle/

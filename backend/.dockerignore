@@ -1,0 +1,10 @@
+__pycache__
+**/__pycache__
+*.pyc
+.env
+*.log
+sanctions.db
+docker-compose.yml
+dummy
+Dockerfile
+.dockerignore

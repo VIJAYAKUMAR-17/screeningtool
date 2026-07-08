@@ -220,9 +220,9 @@ def _normalize_record(raw: dict[str, Any], query_name: str) -> dict[str, Any]:
 
     remarks = _first_str(raw, ["remarks", "comment", "comments", "note", "notes", "summary"])
 
-    score = _first_float(raw, ["score", "match_score", "name_score", "relevance"])
-    if score is None:
-        score = float(fuzz.token_sort_ratio(normalize_name(query_name), normalize_name(name)))
+    # The API's own `score` is a search-relevance metric, not a name-similarity
+    # confidence; always re-score locally against the record's names.
+    score = _local_similarity(query_name, name, raw)
 
     return {
         "entity_name": name,
@@ -242,6 +242,66 @@ def _normalize_record(raw: dict[str, Any], query_name: str) -> dict[str, Any]:
         # Preserve all additional API metadata for downstream audit/debug use.
         "metadata": raw,
     }
+
+
+# Generic corporate words that dominate ratio scores without identifying the
+# entity; similarity driven only by these must not auto-flag.
+_GENERIC_TOKENS = {
+    "international", "company", "general", "global", "national", "universal",
+    "standard", "united", "services", "solutions", "systems", "technologies",
+    "technology", "development", "investment", "commercial", "engineering",
+}
+
+
+def _strip_generic(tokens: list[str]) -> list[str]:
+    return [t for t in tokens if t not in _GENERIC_TOKENS]
+
+
+def _local_similarity(query_name: str, primary_name: str, raw: dict[str, Any]) -> float:
+    query = normalize_name(query_name)
+    if not query:
+        return 0.0
+
+    candidates = [primary_name]
+    for key in ("alt_names", "alt_name", "aliases"):
+        candidates.extend(_to_list(raw.get(key)))
+
+    query_tokens = [t for t in query.split() if len(t) > 2]
+    distinctive_query = " ".join(_strip_generic(query.split()))
+    # token_set_ratio scores 100 on any token-subset match (e.g. a single shared
+    # generic word), so blend it with token_sort_ratio instead of trusting it
+    # outright: subset matches surface for review without auto-flagging.
+    use_set_ratio = len(query_tokens) >= 2
+
+    best = 0.0
+    for candidate in candidates:
+        cand = normalize_name(candidate or "")
+        if not cand:
+            continue
+        sort_score = float(fuzz.token_sort_ratio(query, cand))
+        score = sort_score
+        if use_set_ratio:
+            set_score = float(fuzz.token_set_ratio(query, cand))
+            score = max(sort_score, (sort_score + set_score) / 2)
+
+        # Similarity carried mostly by generic words ("International", "Company")
+        # is weak evidence: average in the score of the distinctive tokens alone
+        # so e.g. "Auto International" vs "BLUTO INTERNATIONAL" lands in review
+        # instead of being auto-flagged.
+        distinctive_cand = " ".join(_strip_generic(cand.split()))
+        if distinctive_query and distinctive_cand and distinctive_query != query:
+            distinctive_score = float(fuzz.token_sort_ratio(distinctive_query, distinctive_cand))
+            score = (score + distinctive_score) / 2
+
+        # A short query like "Rosneft" barely overlaps "Rosneft Oil Company"
+        # on ratio alone; if every meaningful query token appears verbatim in
+        # the candidate, that is a strong signal that must reach review level.
+        if query_tokens:
+            cand_tokens = set(cand.split())
+            if all(t in cand_tokens for t in query_tokens):
+                score = max(score, 90.0)
+        best = max(best, score)
+    return best
 
 
 def _first_str(obj: dict[str, Any], keys: list[str]) -> str | None:

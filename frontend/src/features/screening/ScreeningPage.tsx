@@ -124,7 +124,7 @@ export function ScreeningPage() {
     await Promise.all(ops);
   };
 
-  const runTier2ForEntity = async (runId: number, entityName: string) => {
+  const runTier2ForEntity = async (runId: number, entityName: string): Promise<boolean> => {
     setTier2LoadingByEntity((prev) => ({ ...prev, [entityName]: true }));
     setTier2ErrorByEntity((prev) => ({ ...prev, [entityName]: "" }));
 
@@ -135,8 +135,10 @@ export function ScreeningPage() {
         { timeout: 0 },
       );
       setTier2ByEntity((prev) => ({ ...prev, [entityName]: data }));
+      return true;
     } catch (err) {
       setTier2ErrorByEntity((prev) => ({ ...prev, [entityName]: (err as Error).message }));
+      return false;
     } finally {
       setTier2LoadingByEntity((prev) => ({ ...prev, [entityName]: false }));
     }
@@ -147,9 +149,9 @@ export function ScreeningPage() {
     if (!uniqueNames.length) return;
 
     toast.loading("Tier 2 screening started for all rows", { id: "tier2-batch" });
-    await Promise.all(uniqueNames.map((name) => runTier2ForEntity(runId, name)));
+    const outcomes = await Promise.all(uniqueNames.map((name) => runTier2ForEntity(runId, name)));
 
-    const failed = uniqueNames.filter((name) => Boolean(tier2ErrorByEntity[name])).length;
+    const failed = outcomes.filter((ok) => !ok).length;
     if (failed > 0) {
       toast.error(`Tier 2 completed with ${failed} issue(s). Eye icon works for successful rows.`, { id: "tier2-batch" });
     } else {

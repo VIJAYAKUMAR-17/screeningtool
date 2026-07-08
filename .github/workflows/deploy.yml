@@ -1,0 +1,71 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPO: 311212292744.dkr.ecr.ap-south-1.amazonaws.com/screening-backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: /
+          VITE_LIVE_OFAC: "true"
+          VITE_LIVE_OFAC_FALLBACK_TO_DB: "true"
+        run: |
+          npm ci
+          npm run build
+          rm -rf ../backend/api/static
+          cp -R dist ../backend/api/static
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::311212292744:role/screening-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        run: |
+          docker build -t $ECR_REPO:${{ github.sha }} -t $ECR_REPO:latest backend
+          docker push $ECR_REPO:${{ github.sha }}
+          docker push $ECR_REPO:latest
+
+      - name: Deploy new task revision
+        run: |
+          aws ecs describe-task-definition --task-definition screening-backend --query taskDefinition > taskdef.json
+          jq --arg IMG "$ECR_REPO:${{ github.sha }}" \
+            '.containerDefinitions[0].image = $IMG
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            taskdef.json > taskdef-new.json
+          NEW_ARN=$(aws ecs register-task-definition --cli-input-json file://taskdef-new.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster screening-cluster --service screening-backend --task-definition "$NEW_ARN" >/dev/null
+          aws ecs wait services-stable --cluster screening-cluster --services screening-backend
+
+      - name: Smoke test
+        run: |
+          curl -sf --retry 3 https://d1swcy48l389qg.cloudfront.net/health
