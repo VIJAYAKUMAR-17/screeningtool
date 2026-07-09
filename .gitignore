@@ -9,6 +9,8 @@ backend/api/static/*
 # Environment / secrets
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # Python
 __pycache__/
@@ -28,3 +30,4 @@ qa-downloads/
 qa-fixtures/
 qa-screenshots/
 demo_bundle/
+.lavish/

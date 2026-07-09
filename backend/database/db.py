@@ -1,4 +1,5 @@
 from sqlalchemy import create_engine
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from config import settings
 
@@ -33,17 +34,42 @@ def init_db():
 
 # create_all never alters existing tables, so columns added to models after the
 # first deploy must be back-filled here until Alembic is adopted.
-_MIGRATION_STATEMENTS = [
-    "ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS sources_checked JSON",
-    "ALTER TABLE screening_runs ADD COLUMN IF NOT EXISTS data_mode VARCHAR",
+_MIGRATION_COLUMNS = [
+    ("vendors", "org_id", "VARCHAR"),
+    ("vendors", "created_by_user_id", "VARCHAR"),
+    ("screening_runs", "sources_checked", "JSON"),
+    ("screening_runs", "data_mode", "VARCHAR"),
+    ("screening_runs", "org_id", "VARCHAR"),
+    ("screening_runs", "created_by_user_id", "VARCHAR"),
+    ("screening_runs", "org_role", "VARCHAR"),
+    ("screening_runs", "org_permissions", "JSON"),
+    ("screening_results", "org_id", "VARCHAR"),
+    ("screening_results", "created_by_user_id", "VARCHAR"),
+    ("tier2_screening_runs", "org_id", "VARCHAR"),
+    ("tier2_screening_runs", "created_by_user_id", "VARCHAR"),
+]
+
+_MIGRATION_INDEXES = [
+    ("ix_vendors_org_id", "vendors", "org_id"),
+    ("ix_screening_runs_org_id", "screening_runs", "org_id"),
+    ("ix_screening_results_org_id", "screening_results", "org_id"),
+    ("ix_tier2_screening_runs_org_id", "tier2_screening_runs", "org_id"),
 ]
 
 
 def _apply_lightweight_migrations():
-    from sqlalchemy import text
-
-    if _is_sqlite:
-        return
     with engine.begin() as conn:
-        for statement in _MIGRATION_STATEMENTS:
-            conn.execute(text(statement))
+        inspector = inspect(conn)
+        table_names = set(inspector.get_table_names())
+
+        for table_name, column_name, column_type in _MIGRATION_COLUMNS:
+            if table_name not in table_names:
+                continue
+            existing = {column["name"] for column in inspector.get_columns(table_name)}
+            if column_name not in existing:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))
+
+        for index_name, table_name, column_name in _MIGRATION_INDEXES:
+            if table_name not in table_names:
+                continue
+            conn.execute(text(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name})"))

@@ -24,3 +24,23 @@ body {
   box-sizing: border-box;
 }
 
+.auth-config-error {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: #142536;
+  text-align: center;
+}
+
+.auth-config-error h1 {
+  margin: 0;
+  font: 700 28px/1.2 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.auth-config-error p {
+  margin: 0;
+  color: #526274;
+  font: 400 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}

@@ -34,6 +34,7 @@ jobs:
           VITE_API_BASE_URL: /
           VITE_LIVE_OFAC: "true"
           VITE_LIVE_OFAC_FALLBACK_TO_DB: "true"
+          VITE_CLERK_PUBLISHABLE_KEY: pk_test_bmV1dHJhbC1idXp6YXJkLTY4LmNsZXJrLmFjY291bnRzLmRldiQ
         run: |
           npm ci
           npm run build

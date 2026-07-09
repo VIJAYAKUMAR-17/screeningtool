@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, selectinload
 
+from auth import AuthContext, require_auth_context
 from database.db import get_db
 from database.models import MatchStatus, ScreeningRun
 
@@ -18,8 +19,16 @@ def _build_run_metrics(run: ScreeningRun) -> tuple[int, int, int, int]:
 
 
 @router.get("/stats")
-def dashboard_stats(db: Session = Depends(get_db)):
-    runs = db.query(ScreeningRun).options(selectinload(ScreeningRun.results)).all()
+def dashboard_stats(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    runs = (
+        db.query(ScreeningRun)
+        .filter(ScreeningRun.org_id == auth.org_id)
+        .options(selectinload(ScreeningRun.results))
+        .all()
+    )
 
     total_screenings = 0
     matches_found = 0
@@ -42,8 +51,16 @@ def dashboard_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/charts")
-def dashboard_charts(db: Session = Depends(get_db)):
-    runs = db.query(ScreeningRun).options(selectinload(ScreeningRun.results)).all()
+def dashboard_charts(
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    runs = (
+        db.query(ScreeningRun)
+        .filter(ScreeningRun.org_id == auth.org_id)
+        .options(selectinload(ScreeningRun.results))
+        .all()
+    )
 
     today = datetime.utcnow().date()
     trend_map: dict[str, dict[str, int]] = {}

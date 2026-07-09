@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getAuthToken } from "@/auth/authToken";
 
 const resolveBaseUrl = (): string => {
   const raw = import.meta.env.VITE_API_BASE_URL;
@@ -27,6 +28,14 @@ const resolveBaseUrl = (): string => {
 export const http = axios.create({
   baseURL: resolveBaseUrl(),
   timeout: 30000,
+});
+
+http.interceptors.request.use(async (config) => {
+  const token = await getAuthToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 http.interceptors.response.use(

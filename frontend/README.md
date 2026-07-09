@@ -12,6 +12,7 @@ Enterprise-grade React frontend for OFAC screening workflows.
 - React Hook Form + Zod
 - MUI Data Grid + Recharts
 - PapaParse + FileSaver + React Hot Toast
+- Clerk React auth + Organizations
 - Vitest + Testing Library
 
 ## Run
@@ -27,7 +28,10 @@ Create `.env` from `.env.example`.
 
 ```bash
 VITE_API_BASE_URL=/api
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_replace_me
 ```
+
+The app requires a signed-in Clerk user with an active Organization. API requests include the Clerk session token as a bearer token; the backend enforces tenant isolation with the active organization id.
 
 ## API Assumptions
 

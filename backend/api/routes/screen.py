@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from auth import AuthContext, Permission, require_permission
 from agent.analyst import ScreeningAnalyst
 from agent.narrator import ReportNarrator
 from database.db import get_db
@@ -97,7 +98,11 @@ def _status_from_score(score: float) -> MatchStatus:
 
 
 @router.post("/")
-def screen(req: ScreenRequest, db: Session = Depends(get_db)):
+def screen(
+    req: ScreenRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.SCREENINGS_CREATE)),
+):
     """
     Screen vendors against sanctions lists.
 
@@ -106,9 +111,15 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
       The request field name is kept for backward compatibility.
     - live_ofac=false: uses DB-backed sources only (lists filter optional).
     """
-    vendor_repo = VendorRepository(db)
+    vendor_repo = VendorRepository(db, org_id=auth.org_id, user_id=auth.user_id)
     sanction_repo = SanctionRepository(db)
-    run_repo = ScreeningRunRepository(db)
+    run_repo = ScreeningRunRepository(
+        db,
+        org_id=auth.org_id,
+        user_id=auth.user_id,
+        org_role=auth.org_role,
+        org_permissions=auth.org_permissions,
+    )
 
     # The customer name is metadata identifying who the run is for; it is
     # NOT screened. Only the submitted vendors/companies are screened.
@@ -323,9 +334,13 @@ def screen(req: ScreenRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/vendors/link")
-def link_vendors(req: VendorLinkRequest, db: Session = Depends(get_db)):
+def link_vendors(
+    req: VendorLinkRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.SCREENINGS_CREATE)),
+):
     """Register a Tier 2 supplier relationship between two vendors."""
-    vendor_repo = VendorRepository(db)
+    vendor_repo = VendorRepository(db, org_id=auth.org_id, user_id=auth.user_id)
     parent = vendor_repo.get_or_create(req.parent_vendor_name, customer_name=req.customer_name)
     child = vendor_repo.get_or_create(req.child_vendor_name, customer_name=req.customer_name)
     vendor_repo.link_supplier(parent.id, child.id)

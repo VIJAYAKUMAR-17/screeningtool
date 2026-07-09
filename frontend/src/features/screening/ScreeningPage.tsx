@@ -43,6 +43,8 @@ import { Link as RouterLink } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { PageTitle } from "@/components/common/PageTitle";
 import { StatusChip } from "@/components/common/StatusChip";
+import { permissions, useCan } from "@/auth/permissions";
+import { registerTenantReset } from "@/auth/tenantState";
 import { api } from "@/services/api";
 import { http } from "@/services/http";
 import { ScreenInput, Tier2ScreeningResult } from "@/types/api";
@@ -72,13 +74,23 @@ const screeningPageCache: ScreeningPageCache = {
   activeEntity: null,
 };
 
+function resetScreeningPageCache() {
+  screeningPageCache.lastResult = null;
+  screeningPageCache.tier2ByEntity = {};
+  screeningPageCache.tier2LoadingByEntity = {};
+  screeningPageCache.tier2ErrorByEntity = {};
+  screeningPageCache.activeEntity = null;
+}
+
+const defaultScreeningFormValues = {
+  customerName: "",
+  entries: [{ companyName: "", country: "", identifier: "" }],
+};
+
 export function ScreeningPage() {
   const form = useForm<ScreeningFormValues>({
     resolver: zodResolver(screeningFormSchema),
-    defaultValues: {
-      customerName: "",
-      entries: [{ companyName: "", country: "", identifier: "" }],
-    },
+    defaultValues: defaultScreeningFormValues,
   });
 
   const entriesArray = useFieldArray({ control: form.control, name: "entries" });
@@ -89,6 +101,24 @@ export function ScreeningPage() {
   const [tier2ErrorByEntity, setTier2ErrorByEntity] = useState<Record<string, string>>(screeningPageCache.tier2ErrorByEntity);
   const [activeEntity, setActiveEntity] = useState<string | null>(screeningPageCache.activeEntity);
   const [selectedResult, setSelectedResult] = useState<ScreeningResultRow | null>(null);
+  const canCreateScreening = useCan(permissions.screeningsCreate);
+  const canCreateTier2 = useCan(permissions.tier2Create);
+  const canExportReports = useCan(permissions.reportsExport);
+
+  useEffect(
+    () =>
+      registerTenantReset(() => {
+        resetScreeningPageCache();
+        setLastResult(null);
+        setTier2ByEntity({});
+        setTier2LoadingByEntity({});
+        setTier2ErrorByEntity({});
+        setActiveEntity(null);
+        setSelectedResult(null);
+        form.reset(defaultScreeningFormValues);
+      }),
+    [form],
+  );
 
   useEffect(() => {
     screeningPageCache.lastResult = lastResult;
@@ -189,17 +219,24 @@ export function ScreeningPage() {
       setActiveEntity(null);
 
       const submittedEntries = form.getValues("entries");
-      await runAllTier2(data.runId, submittedEntries);
+      if (canCreateTier2) {
+        await runAllTier2(data.runId, submittedEntries);
+      }
       await refreshDerivedScreens(data.runId);
     },
     onError: (err) => toast.error(err.message, { id: "screening" }),
   });
 
   const onSubmit = form.handleSubmit((values) => {
+    if (!canCreateScreening) {
+      toast.error("Your role cannot create screening runs.");
+      return;
+    }
     screenMutation.mutate({ customerName: values.customerName, entities: values.entries });
   });
 
   const clearResults = () => {
+    resetScreeningPageCache();
     setLastResult(null);
     setTier2ByEntity({});
     setTier2LoadingByEntity({});
@@ -208,6 +245,10 @@ export function ScreeningPage() {
   };
 
   const downloadReport = async (kind: "pdf" | "excel") => {
+    if (!canExportReports) {
+      toast.error("Your role cannot export reports.");
+      return;
+    }
     if (!lastResult?.runId) {
       toast.error("Run a screening first");
       return;
@@ -366,9 +407,9 @@ const tier2Entities = Object.keys(tier2ByEntity);
               <Button startIcon={<PlaylistAddOutlinedIcon />} onClick={() => entriesArray.append({ companyName: "", country: "", identifier: "" })}>Add Another Name</Button>
               <Button color="warning" onClick={() => form.reset({ customerName: "", entries: [{ companyName: "", country: "", identifier: "" }] })}>Clear Form</Button>
               <Button color="warning" onClick={clearResults} disabled={!lastResult && Object.keys(tier2ByEntity).length === 0}>Clear All</Button>
-              <Button type="submit" disabled={screenMutation.isPending} variant="contained" startIcon={<PlayCircleOutlineOutlinedIcon />}>Screen All</Button>
-              <Button startIcon={<DownloadOutlinedIcon />} disabled={!lastResult} onClick={() => void downloadReport("pdf")}>Download PDF</Button>
-              <Button startIcon={<DownloadOutlinedIcon />} disabled={!lastResult} onClick={() => void downloadReport("excel")}>Download Excel</Button>
+              <Button type="submit" disabled={screenMutation.isPending || !canCreateScreening} variant="contained" startIcon={<PlayCircleOutlineOutlinedIcon />}>Screen All</Button>
+              <Button startIcon={<DownloadOutlinedIcon />} disabled={!lastResult || !canExportReports} onClick={() => void downloadReport("pdf")}>Download PDF</Button>
+              <Button startIcon={<DownloadOutlinedIcon />} disabled={!lastResult || !canExportReports} onClick={() => void downloadReport("excel")}>Download Excel</Button>
               <Typography variant="body2" color="text.secondary" sx={{ ml: "auto !important" }}>
                 Have a long list? <Link component={RouterLink} to="/bulk-screening" underline="hover">Use Bulk Screening</Link>
               </Typography>
@@ -382,7 +423,7 @@ const tier2Entities = Object.keys(tier2ByEntity);
           <CardContent>
             <Typography variant="h6" sx={{ mb: 1.5 }}>Tier 1 Results</Typography>
             <Alert severity="info" sx={{ mb: 2 }}>
-              Run {lastResult.runId} completed in {lastResult.elapsedSeconds.toFixed(2)}s. Tier 2 ready for {readyCount}/{resultRows.length} rows. Click the eye icon to view details.
+              Run {lastResult.runId} completed in {lastResult.elapsedSeconds.toFixed(2)}s. Tier 2 ready for {readyCount}/{resultRows.length} rows.
             </Alert>
             {lastResult.screeningSources && lastResult.screeningSources.listsChecked.length > 0 && (
               <Alert severity={lastResult.screeningSources.mode === "database" ? "warning" : "success"} sx={{ mb: 2 }}>
@@ -522,9 +563,6 @@ const tier2Entities = Object.keys(tier2ByEntity);
     </Stack>
   );
 }
-
-
-
 
 
 

@@ -11,6 +11,18 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/sanctions"
 
+    # Clerk authentication
+    clerk_issuer: str = ""
+    clerk_jwks_url: str = ""
+    clerk_jwt_key: str = ""
+    clerk_audience: str = ""
+    clerk_authorized_parties: str = ""
+    clerk_require_organization: bool = True
+
+    # CORS: comma-separated list of allowed browser origins.
+    # Empty means same-origin only (no cross-origin browser access).
+    cors_allow_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
     # Screening thresholds
     match_threshold: int = 85
     fuzzy_review_threshold: int = 70

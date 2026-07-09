@@ -1,15 +1,16 @@
 from datetime import datetime
 from typing import Optional
+
 from sqlalchemy.orm import Session
+
 from database.models import (
-    SanctionedEntity,
-    Vendor,
-    ScreeningRun,
-    ScreeningResult,
-    Tier2ScreeningRun,
     ListSyncState,
     RunStatus,
-    MatchStatus,
+    SanctionedEntity,
+    ScreeningResult,
+    ScreeningRun,
+    Tier2ScreeningRun,
+    Vendor,
 )
 
 
@@ -42,27 +43,42 @@ class SanctionRepository:
 
 
 class VendorRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, org_id: str | None = None, user_id: str | None = None):
         self.db = db
+        self.org_id = org_id
+        self.user_id = user_id
+
+    def _query(self):
+        query = self.db.query(Vendor)
+        if self.org_id is not None:
+            query = query.filter(Vendor.org_id == self.org_id)
+        return query
 
     def get_or_create(
         self, name: str, country: str = None, customer_name: str = None
     ) -> Vendor:
-        vendor = self.db.query(Vendor).filter(Vendor.name == name).first()
+        vendor = self._query().filter(Vendor.name == name).first()
         if not vendor:
-            vendor = Vendor(name=name, country=country, customer_name=customer_name)
+            vendor = Vendor(
+                name=name,
+                country=country,
+                customer_name=customer_name,
+                org_id=self.org_id,
+                created_by_user_id=self.user_id,
+            )
             self.db.add(vendor)
             self.db.commit()
             self.db.refresh(vendor)
         return vendor
 
     def get_all(self) -> list[Vendor]:
-        return self.db.query(Vendor).all()
+        return self._query().all()
 
     def link_supplier(self, parent_id: int, child_id: int):
-        child = self.db.query(Vendor).filter(Vendor.id == child_id).first()
-        if child:
-            child.parent_vendor_id = parent_id
+        child = self._query().filter(Vendor.id == child_id).first()
+        parent = self._query().filter(Vendor.id == parent_id).first()
+        if child and parent:
+            child.parent_vendor_id = parent.id
             child.tier = 2
             self.db.commit()
 
@@ -98,8 +114,25 @@ class SyncStateRepository:
 
 
 class ScreeningRunRepository:
-    def __init__(self, db: Session):
+    def __init__(
+        self,
+        db: Session,
+        org_id: str | None = None,
+        user_id: str | None = None,
+        org_role: str | None = None,
+        org_permissions: tuple[str, ...] | list[str] | None = None,
+    ):
         self.db = db
+        self.org_id = org_id
+        self.user_id = user_id
+        self.org_role = org_role
+        self.org_permissions = list(org_permissions or [])
+
+    def _query(self):
+        query = self.db.query(ScreeningRun)
+        if self.org_id is not None:
+            query = query.filter(ScreeningRun.org_id == self.org_id)
+        return query
 
     def create(
         self,
@@ -113,6 +146,10 @@ class ScreeningRunRepository:
             vendor_names=vendor_names,
             sources_checked=sources_checked or [],
             data_mode=data_mode,
+            org_id=self.org_id,
+            created_by_user_id=self.user_id,
+            org_role=self.org_role,
+            org_permissions=self.org_permissions,
         )
         self.db.add(run)
         self.db.commit()
@@ -120,7 +157,7 @@ class ScreeningRunRepository:
         return run
 
     def get(self, run_id: int) -> Optional[ScreeningRun]:
-        return self.db.query(ScreeningRun).filter(ScreeningRun.id == run_id).first()
+        return self._query().filter(ScreeningRun.id == run_id).first()
 
     def update_status(
         self,
@@ -141,7 +178,14 @@ class ScreeningRunRepository:
             self.db.commit()
 
     def add_result(self, run_id: int, data: dict) -> ScreeningResult:
-        result = ScreeningResult(run_id=run_id, **data)
+        if self.org_id is not None and not self.get(run_id):
+            raise ValueError(f"Run {run_id} not found for current tenant.")
+        result = ScreeningResult(
+            run_id=run_id,
+            org_id=self.org_id,
+            created_by_user_id=self.user_id,
+            **data,
+        )
         self.db.add(result)
         self.db.commit()
         self.db.refresh(result)
@@ -149,8 +193,16 @@ class ScreeningRunRepository:
 
 
 class Tier2RunRepository:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, org_id: str | None = None, user_id: str | None = None):
         self.db = db
+        self.org_id = org_id
+        self.user_id = user_id
+
+    def _query(self):
+        query = self.db.query(Tier2ScreeningRun)
+        if self.org_id is not None:
+            query = query.filter(Tier2ScreeningRun.org_id == self.org_id)
+        return query
 
     def create(
         self,
@@ -168,6 +220,8 @@ class Tier2RunRepository:
             risk_level=risk_level,
             findings=findings,
             data_sources=data_sources,
+            org_id=self.org_id,
+            created_by_user_id=self.user_id,
         )
         self.db.add(run)
         self.db.commit()
@@ -176,7 +230,7 @@ class Tier2RunRepository:
 
     def get_latest_for_tier1(self, tier1_run_id: int) -> Optional[Tier2ScreeningRun]:
         return (
-            self.db.query(Tier2ScreeningRun)
+            self._query()
             .filter(Tier2ScreeningRun.tier1_run_id == tier1_run_id)
             .order_by(Tier2ScreeningRun.created_at.desc())
             .first()
@@ -184,7 +238,7 @@ class Tier2RunRepository:
 
     def list_recent(self, limit: int = 25) -> list[Tier2ScreeningRun]:
         return (
-            self.db.query(Tier2ScreeningRun)
+            self._query()
             .order_by(Tier2ScreeningRun.created_at.desc())
             .limit(limit)
             .all()

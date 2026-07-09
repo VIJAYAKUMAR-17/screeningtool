@@ -42,6 +42,8 @@ import toast from "react-hot-toast";
 import { motion } from "framer-motion";
 import { PageTitle } from "@/components/common/PageTitle";
 import { StatusChip } from "@/components/common/StatusChip";
+import { permissions, useCan } from "@/auth/permissions";
+import { registerTenantReset } from "@/auth/tenantState";
 import { api } from "@/services/api";
 import { http } from "@/services/http";
 import { Tier2StructuredDetails } from "@/components/common/Tier2StructuredDetails";
@@ -86,6 +88,19 @@ const bulkPageCache: BulkPageCache = {
   tier2ErrorByEntity: {},
   activeEntity: null,
 };
+
+function resetBulkPageCache() {
+  bulkPageCache.rows = [];
+  bulkPageCache.outcomeRows = [];
+  bulkPageCache.processed = 0;
+  bulkPageCache.matchesFound = 0;
+  bulkPageCache.activeTab = 0;
+  bulkPageCache.pasteBlock = "";
+  bulkPageCache.tier2ByEntity = {};
+  bulkPageCache.tier2LoadingByEntity = {};
+  bulkPageCache.tier2ErrorByEntity = {};
+  bulkPageCache.activeEntity = null;
+}
 
 const columns: GridColDef<CsvRow>[] = [
   { field: "companyName", headerName: "Company/Vendor Name", flex: 1.2, minWidth: 220 },
@@ -145,6 +160,28 @@ export function BulkScreeningPage() {
   const [activeEntity, setActiveEntity] = useState<string | null>(bulkPageCache.activeEntity);
   const [selectedOutcome, setSelectedOutcome] = useState<OutcomeRow | null>(null);
   const queryClient = useQueryClient();
+  const canCreateScreening = useCan(permissions.screeningsCreate);
+  const canCreateTier2 = useCan(permissions.tier2Create);
+  const canExportReports = useCan(permissions.reportsExport);
+
+  useEffect(
+    () =>
+      registerTenantReset(() => {
+        resetBulkPageCache();
+        setRows([]);
+        setOutcomeRows([]);
+        setProcessed(0);
+        setMatchesFound(0);
+        setActiveTab(0);
+        setPasteBlock("");
+        setTier2ByEntity({});
+        setTier2LoadingByEntity({});
+        setTier2ErrorByEntity({});
+        setActiveEntity(null);
+        setSelectedOutcome(null);
+      }),
+    [],
+  );
 
   useEffect(() => {
     bulkPageCache.rows = rows;
@@ -383,7 +420,9 @@ export function BulkScreeningPage() {
         }));
       setOutcomeRows(mappedOutcomes);
       toast.success(`Bulk screening completed: ${data.summary.clear} clear, ${data.summary.reviewNeeded} review, ${data.summary.flagged} flagged`, { id: "bulk" });
-      await runAllTier2ForOutcomes(mappedOutcomes);
+      if (canCreateTier2) {
+        await runAllTier2ForOutcomes(mappedOutcomes);
+      }
       await refreshDerivedScreens(mappedOutcomes.map((row) => row.tier1RunId ?? 0));
     },
     onError: (err) => toast.error(err.message, { id: "bulk" }),
@@ -456,6 +495,11 @@ export function BulkScreeningPage() {
   );
 
   const downloadBulkReports = async (kind: "pdf" | "excel") => {
+    if (!canExportReports) {
+      toast.error("Your role cannot export reports.");
+      return;
+    }
+
     if (!runIdsForReports.length) {
       toast.error("Run bulk screening first");
       return;
@@ -593,13 +637,17 @@ export function BulkScreeningPage() {
       <Button
         startIcon={<PlayArrowOutlinedIcon />}
         variant="contained"
-        onClick={() =>
+        onClick={() => {
+          if (!canCreateScreening) {
+            toast.error("Your role cannot create screening runs.");
+            return;
+          }
           screenBulk.mutate({
             customerName,
             entities: validRows.map((r) => ({ companyName: r.companyName, country: r.country, identifier: r.identifier })),
-          })
-        }
-        disabled={!validRows.length || screenBulk.isPending}
+          });
+        }}
+        disabled={!validRows.length || screenBulk.isPending || !canCreateScreening}
       >
         Screen All Uploaded Entities      </Button>
 
@@ -607,14 +655,14 @@ export function BulkScreeningPage() {
         <Button
           startIcon={<DownloadOutlinedIcon />}
           onClick={() => void downloadBulkReports("pdf")}
-          disabled={!runIdsForReports.length}
+          disabled={!runIdsForReports.length || !canExportReports}
         >
           Download PDF Reports
         </Button>
         <Button
           startIcon={<DownloadOutlinedIcon />}
           onClick={() => void downloadBulkReports("excel")}
-          disabled={!runIdsForReports.length}
+          disabled={!runIdsForReports.length || !canExportReports}
         >
           Download Excel Reports
         </Button>
@@ -643,7 +691,7 @@ export function BulkScreeningPage() {
               <Typography variant="h6">Screening Outcomes</Typography>
               <Typography color="text.secondary">Per-entity screening results after bulk run completion.</Typography>
               <Alert severity="info">
-                Tier 2 ready for {readyCount}/{outcomeRows.length} rows. Click the eye icon to view details.
+                Tier 2 ready for {readyCount}/{outcomeRows.length} rows.
               </Alert>
               <Box sx={{ height: 460 }}>
                 <DataGrid

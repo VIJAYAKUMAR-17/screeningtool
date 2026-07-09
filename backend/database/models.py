@@ -61,6 +61,8 @@ class Vendor(Base):
     __tablename__ = "vendors"
 
     id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(String, nullable=True, index=True)
+    created_by_user_id = Column(String, nullable=True)
     name = Column(String, nullable=False, index=True)
     country = Column(String(3), nullable=True)
     customer_name = Column(String, nullable=True)
@@ -76,6 +78,10 @@ class ScreeningRun(Base):
     __tablename__ = "screening_runs"
 
     id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(String, nullable=True, index=True)
+    created_by_user_id = Column(String, nullable=True)
+    org_role = Column(String, nullable=True)
+    org_permissions = Column(JSON, default=list)
     customer_name = Column(String, nullable=True)
     vendor_names = Column(JSON, default=list)
     # Coverage disclosure: which list sources were checked and via which data
@@ -96,6 +102,8 @@ class ScreeningResult(Base):
     __tablename__ = "screening_results"
 
     id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(String, nullable=True, index=True)
+    created_by_user_id = Column(String, nullable=True)
     run_id = Column(Integer, ForeignKey("screening_runs.id"), nullable=False)
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
     vendor_name = Column(String, nullable=False)
@@ -118,6 +126,8 @@ class Tier2ScreeningRun(Base):
     __tablename__ = "tier2_screening_runs"
 
     id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(String, nullable=True, index=True)
+    created_by_user_id = Column(String, nullable=True)
     tier1_run_id = Column(Integer, ForeignKey("screening_runs.id"), nullable=False, index=True)
     target_entity = Column(String, nullable=False)
     risk_score = Column(Integer, default=0)

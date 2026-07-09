@@ -3,8 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from config import settings
 from database.db import init_db
-from api.routes import dashboard, report, screen, tier2
+from api.routes import auth, dashboard, report, screen, tier2
 
 app = FastAPI(
     title="Trade Sanctions Screening API",
@@ -15,12 +16,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")
@@ -32,6 +35,7 @@ app.include_router(screen.router, prefix="/screen", tags=["Screening"])
 app.include_router(report.router, prefix="/report", tags=["Reports"])
 app.include_router(tier2.router, prefix="/tier2", tags=["Tier 2 Screening"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
+app.include_router(auth.router, prefix="/auth", tags=["Auth"])
 
 _STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
@@ -52,9 +56,8 @@ def frontend():
 
 @app.get("/{full_path:path}", include_in_schema=False)
 def spa_fallback(full_path: str):
-    api_paths = ("screen", "report", "tier2", "dashboard", "health", "docs", "openapi.json", "static", "assets")
+    api_paths = ("screen", "report", "tier2", "dashboard", "auth", "health", "docs", "openapi.json", "static", "assets")
     for item in api_paths:
         if full_path == item or full_path.startswith(f"{item}/"):
             return FileResponse(_STATIC_DIR / "index.html", status_code=404)
     return FileResponse(_STATIC_DIR / "index.html")
-

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from auth import AuthContext, Permission, require_auth_context, require_permission
 from database.db import get_db
-from database.models import ScreeningRun
+from database.models import MatchStatus, ScreeningRun
 from database.repository import ScreeningRunRepository
 from reporter.excel import generate_excel
 from reporter.pdf import generate_pdf
@@ -12,19 +13,24 @@ from reporter.erp_format import build_erp_payload
 router = APIRouter()
 
 
-def _get_run_or_404(run_id: int, db: Session) -> ScreeningRun:
-    run = ScreeningRunRepository(db).get(run_id)
+def _get_run_or_404(run_id: int, db: Session, auth: AuthContext) -> ScreeningRun:
+    run = ScreeningRunRepository(db, org_id=auth.org_id).get(run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Run {run_id} not found.")
     return run
 
 
 @router.get("/")
-def list_reports(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
+def list_reports(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
     """List recent screening runs with per-run outcome counts."""
-    from database.models import MatchStatus
     runs = (
         db.query(ScreeningRun)
+        .filter(ScreeningRun.org_id == auth.org_id)
         .order_by(ScreeningRun.started_at.desc())
         .offset(skip)
         .limit(limit)
@@ -47,9 +53,13 @@ def list_reports(skip: int = 0, limit: int = 50, db: Session = Depends(get_db)):
 
 
 @router.get("/{run_id}")
-def get_report(run_id: int, db: Session = Depends(get_db)):
+def get_report(
+    run_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
     """Retrieve a full screening report as JSON."""
-    run = _get_run_or_404(run_id, db)
+    run = _get_run_or_404(run_id, db, auth)
     return {
         "run_id": run.id,
         "customer_name": run.customer_name,
@@ -78,9 +88,13 @@ def get_report(run_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{run_id}/excel")
-def download_excel(run_id: int, db: Session = Depends(get_db)):
+def download_excel(
+    run_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.REPORTS_EXPORT)),
+):
     """Download screening report as a colour-coded Excel workbook."""
-    run = _get_run_or_404(run_id, db)
+    run = _get_run_or_404(run_id, db, auth)
     content = generate_excel(run)
     filename = f"screening_report_SCR-{run_id:06d}.xlsx"
     return Response(
@@ -91,9 +105,13 @@ def download_excel(run_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{run_id}/pdf")
-def download_pdf(run_id: int, db: Session = Depends(get_db)):
+def download_pdf(
+    run_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.REPORTS_EXPORT)),
+):
     """Download screening report as a formatted PDF."""
-    run = _get_run_or_404(run_id, db)
+    run = _get_run_or_404(run_id, db, auth)
     content = generate_pdf(run)
     filename = f"screening_report_SCR-{run_id:06d}.pdf"
     return Response(
@@ -104,7 +122,11 @@ def download_pdf(run_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{run_id}/erp")
-def erp_payload(run_id: int, db: Session = Depends(get_db)):
+def erp_payload(
+    run_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.REPORTS_EXPORT)),
+):
     """Return ERP-formatted JSON payload for vendor portal integration."""
-    run = _get_run_or_404(run_id, db)
+    run = _get_run_or_404(run_id, db, auth)
     return build_erp_payload(run)

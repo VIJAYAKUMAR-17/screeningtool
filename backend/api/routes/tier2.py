@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from auth import AuthContext, Permission, require_auth_context, require_permission
 from database.db import get_db
 from database.models import RunStatus
 from database.repository import ScreeningRunRepository, Tier2RunRepository
@@ -15,9 +16,13 @@ router = APIRouter()
 
 
 @router.post('/screen')
-async def run_tier2_screening(req: Tier2ScreenRequest, db: Session = Depends(get_db)):
-    tier1_repo = ScreeningRunRepository(db)
-    tier2_repo = Tier2RunRepository(db)
+async def run_tier2_screening(
+    req: Tier2ScreenRequest,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_permission(Permission.TIER2_CREATE)),
+):
+    tier1_repo = ScreeningRunRepository(db, org_id=auth.org_id)
+    tier2_repo = Tier2RunRepository(db, org_id=auth.org_id, user_id=auth.user_id)
 
     tier1_run = tier1_repo.get(req.run_id)
     if not tier1_run:
@@ -69,8 +74,16 @@ async def run_tier2_screening(req: Tier2ScreenRequest, db: Session = Depends(get
 
 
 @router.get('/runs/{tier1_run_id}')
-def get_latest_tier2_for_tier1(tier1_run_id: int, db: Session = Depends(get_db)):
-    run = Tier2RunRepository(db).get_latest_for_tier1(tier1_run_id)
+def get_latest_tier2_for_tier1(
+    tier1_run_id: int,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    tier1_run = ScreeningRunRepository(db, org_id=auth.org_id).get(tier1_run_id)
+    if not tier1_run:
+        raise HTTPException(status_code=404, detail=f'Tier 1 run {tier1_run_id} not found.')
+
+    run = Tier2RunRepository(db, org_id=auth.org_id).get_latest_for_tier1(tier1_run_id)
     if not run:
         raise HTTPException(status_code=404, detail='No Tier 2 run found for this Tier 1 run.')
     return normalize_tier2_findings(
@@ -84,8 +97,12 @@ def get_latest_tier2_for_tier1(tier1_run_id: int, db: Session = Depends(get_db))
 
 
 @router.get('/dashboard', response_model=Tier2SummaryResponse)
-def tier2_dashboard(limit: int = 10, db: Session = Depends(get_db)):
-    rows = Tier2RunRepository(db).list_recent(limit=max(1, min(limit, 50)))
+def tier2_dashboard(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    auth: AuthContext = Depends(require_auth_context),
+):
+    rows = Tier2RunRepository(db, org_id=auth.org_id).list_recent(limit=max(1, min(limit, 50)))
     latest_runs = []
     high = medium = low = 0
 

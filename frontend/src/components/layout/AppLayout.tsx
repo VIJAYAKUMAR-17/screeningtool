@@ -6,10 +6,12 @@ import NotificationsNoneOutlinedIcon from "@mui/icons-material/NotificationsNone
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
 import UploadFileOutlinedIcon from "@mui/icons-material/UploadFileOutlined";
+import { OrganizationSwitcher, UserButton, useAuth, useOrganization } from "@clerk/react";
 import {
   AppBar,
   Avatar,
   Box,
+  Chip,
   Drawer,
   IconButton,
   List,
@@ -49,11 +51,18 @@ export function AppLayout() {
   const location = useLocation();
   const mobile = useMediaQuery(theme.breakpoints.down("md"));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { orgRole } = useAuth();
+  const { organization } = useOrganization();
 
   const currentLabel = useMemo(
     () => navItems.find((item) => location.pathname.startsWith(item.path))?.label ?? "Dashboard",
     [location.pathname],
   );
+
+  const roleLabel = useMemo(() => {
+    const raw = orgRole?.replace(/^org:/, "").replace(/_/g, " ");
+    return raw ? raw.replace(/\b\w/g, (char) => char.toUpperCase()) : "Member";
+  }, [orgRole]);
 
   const drawerContent = (
     <Box sx={{ px: 2, py: 2 }}>
@@ -69,6 +78,11 @@ export function AppLayout() {
         </Box>
       </Stack>
       <List disablePadding>
+        {mobile && (
+          <Box sx={{ mb: 2 }}>
+            <OrganizationSwitcher hidePersonal />
+          </Box>
+        )}
         {navItems.map((item) => (
           <ListItemButton
             key={item.path}
@@ -118,11 +132,26 @@ export function AppLayout() {
           </Typography>
           <Box sx={{ ml: "auto" }}>
             <Stack direction="row" spacing={1} alignItems="center">
+              {!mobile && organization && (
+                <Chip
+                  label={roleLabel}
+                  size="small"
+                  color={orgRole === "org:admin" ? "primary" : "default"}
+                  variant={orgRole === "org:admin" ? "filled" : "outlined"}
+                />
+              )}
+              {!mobile && (
+                <Box sx={{ minWidth: 180 }}>
+                  <OrganizationSwitcher hidePersonal />
+                </Box>
+              )}
               <ThemeToggle />
               <IconButton color="inherit" aria-label="notifications">
                 <NotificationsNoneOutlinedIcon />
               </IconButton>
-              <Avatar sx={{ width: 34, height: 34 }}>CU</Avatar>
+              <Box sx={{ display: "grid", placeItems: "center", width: 34, height: 34 }}>
+                <UserButton />
+              </Box>
             </Stack>
           </Box>
         </Toolbar>
@@ -160,4 +189,3 @@ export function AppLayout() {
     </Box>
   );
 }
-
