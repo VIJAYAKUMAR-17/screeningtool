@@ -18,13 +18,14 @@ Status values: FIXED (deployed and verified live), OPEN (not started).
 | F8  | Deployed bundle called 127.0.0.1:8011; all buttons failed | Frontend built with same-origin API base and rebuilt in CI on every deploy |
 | F9  | Repo tracked node_modules (58k files), build outputs, logs, sanctions.db, and .env files with a live API key | .gitignore added, files untracked; NOTE: rotate the CSL key since it remains in old git history |
 | F10 | No coverage disclosure: "Clear" never said which lists were checked, live-to-DB fallback was silent, List column truncated | Runs persist `sources_checked` + `data_mode`; results banner, JSON report, PDF, and Excel all state lists checked and data source; fallback shows a warning toast; List column widened |
+| F11 | C1: No authentication or tenancy | Clerk auth added (2026-07-09): backend verifies session JWTs, all data is scoped by Clerk organization, RBAC on create/export/tier2, frontend sign-in gate + forced org selection + permission-gated UI. Legacy rows without org_id are invisible to all tenants. Verified E2E with two orgs and three roles |
+| F12 | Clerk v2 token role prefix bug | Clerk v2 session tokens put the org role in `o.rol` without the `org:` prefix; backend role lookup missed and every user (incl. admins) got 403 on create/export. `backend/auth.py` now normalizes the role. Do not regress |
 
 ## 2. Critical - open
 
 | #   | Issue                                                   | Detail                                                                                                                                                                                                |
 | --- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | No authentication or tenancy                            | Every endpoint is public; anyone with the URL can screen, read all history, and download all reports; dashboard aggregates every user's runs globally                                                 |
-| C2  | Failed/running/zero-result runs count in dashboard KPIs | QA posted 500 vendors and inflated Total Screenings to 1,026 with no results; KPI queries should filter run status; QA test pollution still sits in the database                                      |
+| C2  | Failed/running/zero-result runs count in dashboard KPIs | QA posted 500 vendors and inflated Total Screenings to 1,026 with no results; KPI queries should filter run status; QA test pollution still sits in the database (now hidden from tenants because legacy rows have no org_id, but still physically present)                                      |
 | C3  | Excel formula injection                                 | Vendor names like `=SUM(1)` export as live formulas (`reporter/excel.py`); prefix-escape `= + - @` as text                                                                                            |
 | C4  | Silent failure produces false CLEAR                     | Tier 2 now returns per-source coverage status and adds incomplete-coverage risk flags for critical provider/list failures; ingest errors can still silently keep stale data. (Partially addressed by F10 and the Tier 2 coverage-status work) |
 | C5  | Sanctions data freshness is incomplete in DB mode       | Tier 2 can auto-load OFAC when the local fallback is empty, but there is still no scheduler or atomic freshness workflow; UN list is a static repo file in a deprecated format; no EU ingester exists, so DB mode misses those lists entirely |
@@ -46,7 +47,7 @@ Status values: FIXED (deployed and verified live), OPEN (not started).
 | M11 | Tier 2 blocks the event loop                 | Tier 2 live OFAC fetches are now cached and moved off the event loop; CSL calls are also moved off the event loop. Remaining risk: other sync DB work still runs inside async handlers.                                               |
 | M12 | Only the top match is persisted              | The full candidate list exists only in the HTTP response; a compliance tool must retain all evidence                                                                                                                                 |
 | M13 | No analyst disposition workflow              | No cleared-by/reviewed-at/false-positive fields. (Partially addressed by F10: runs now record lists and data mode; thresholds used are still not persisted)                                                                          |
-| M14 | CORS wide open and no rate limiting          | `allow_origins=["*"]`; expensive endpoints are unthrottled                                                                                                                                                                           |
+| M14 | No rate limiting                             | CORS fixed 2026-07-09: origins now come from `CORS_ALLOW_ORIGINS` (empty = same-origin only in production). Expensive endpoints remain unthrottled                                                                                    |
 | M15 | Destructive list ingest                      | clear-then-insert without a transaction; a mid-ingest failure leaves the list empty and produces false CLEARs                                                                                                                        |
 | M16 | Dashboard loads all runs into memory         | Stats computed in Python over the whole table (and the frontend recomputes from a capped limit=100 fetch); needs SQL aggregation                                                                                                     |
 | M17 | Audit Logs page unreachable                  | Feature is built (`features/audit/AuditLogsPage.tsx`) but never registered in the router                                                                                                                                             |
@@ -71,7 +72,7 @@ Status values: FIXED (deployed and verified live), OPEN (not started).
 ## 5. Suggested fix order
 
 1. C2 + C3 + M9 + M10 (small, self-contained; clears the KPI pollution and injection risks in one deploy).
-2. C1 authentication and tenant scoping (unblocks the rest; biggest single item).
+2. ~~C1 authentication and tenant scoping~~ DONE 2026-07-09 (see F11).
 3. C4 + C5 source honesty and real list syncing (kills false CLEARs; see future-spec.md Phase 1-2).
 4. M1 + M12 + M13 (match evidence and audit workflow; makes the tool defensible for compliance).
 5. M4-M6 bulk screening reliability.

@@ -1,6 +1,6 @@
 # Deployment Specification - Screening Tool
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 ## 1. Where the app runs
 
@@ -50,6 +50,22 @@ CloudFront exists to provide HTTPS (the ALB has no TLS certificate because there
 - `/screening/db-password` - the raw RDS master password (kept for reference; the app uses database-url).
 
 Secrets are injected by ECS at container start via the task definition; they are never in the image, the repo, or GitHub.
+
+### Clerk authentication (task definition plain environment variables)
+
+The app authenticates with Clerk (organization = tenant).
+These non-secret values live directly in the task definition `environment` block (added in revision 7) and are carried forward automatically because CI clones the latest task definition revision on every deploy:
+
+- `CLERK_ISSUER=https://neutral-buzzard-68.clerk.accounts.dev` - dev Clerk instance; the backend verifies session JWTs against its JWKS.
+- `CLERK_AUTHORIZED_PARTIES=https://d1swcy48l389qg.cloudfront.net` - accepted `azp` claim values.
+- `CLERK_REQUIRE_ORGANIZATION=true` - requests without an organization claim are rejected.
+- `CORS_ALLOW_ORIGINS=` (empty) - same-origin only; the SPA is served by the API so no CORS is needed in production.
+
+The frontend build receives `VITE_CLERK_PUBLISHABLE_KEY` (a public key) from the `env:` block of the "Build frontend" step in `.github/workflows/deploy.yml`.
+
+NOTE: there is no Clerk production instance yet because Clerk production requires a custom domain (a `*.cloudfront.net` host cannot be used).
+Production currently runs against the Clerk development instance (`pk_test` key, "Development mode" badge in auth modals).
+When a custom domain exists: create the Clerk production instance, configure its DNS records, then update `CLERK_ISSUER`/`CLERK_AUTHORIZED_PARTIES` in the task definition and `VITE_CLERK_PUBLISHABLE_KEY` in the workflow.
 
 ### IAM
 
