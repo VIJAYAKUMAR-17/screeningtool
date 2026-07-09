@@ -8,20 +8,23 @@ body,
 }
 
 body {
-  background-color: #eef3f8;
-  background-image:
-    linear-gradient(rgba(20, 37, 54, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(20, 37, 54, 0.045) 1px, transparent 1px),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(226, 236, 242, 0.7));
-  background-size:
-    28px 28px,
-    28px 28px,
-    auto;
-  background-attachment: fixed;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
 * {
   box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+a {
+  color: inherit;
 }
 
 .auth-config-error {
@@ -30,17 +33,26 @@ body {
   place-content: center;
   gap: 8px;
   padding: 24px;
-  color: #142536;
+  color: #10211e;
+  background-color: #edf3ee;
+  background-image:
+    linear-gradient(rgba(16, 33, 30, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 33, 30, 0.055) 1px, transparent 1px),
+    linear-gradient(135deg, #f7faf5 0%, #e9f0ec 48%, #dfe8e5 100%);
+  background-size:
+    32px 32px,
+    32px 32px,
+    auto;
   text-align: center;
 }
 
 .auth-config-error h1 {
   margin: 0;
-  font: 700 28px/1.2 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 850 28px/1.2 Aptos, "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
 .auth-config-error p {
   margin: 0;
-  color: #526274;
-  font: 400 15px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #5b6a65;
+  font: 500 15px/1.5 Aptos, "IBM Plex Sans", "Segoe UI", sans-serif;
 }

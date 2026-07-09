@@ -13,5 +13,14 @@ const map: Record<ScreeningStatus, { label: string; color: "success" | "warning"
 
 export function StatusChip({ status }: { status: ScreeningStatus }) {
   const cfg = map[status] ?? map.pending;
-  return <Chip label={cfg.label} color={cfg.color} size="small" className={clsx("status-chip", `status-${status}`)} />;
+  return (
+    <Chip
+      label={cfg.label}
+      color={cfg.color}
+      size="small"
+      variant={cfg.color === "default" ? "outlined" : "filled"}
+      className={clsx("status-chip", `status-${status}`)}
+      sx={{ minWidth: 92, justifyContent: "center" }}
+    />
+  );
 }
